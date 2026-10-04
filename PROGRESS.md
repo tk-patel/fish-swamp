@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 4.7 (next up)
-**Last updated:** 2026-10-04 (finished 4.6)
+**Current step:** 5.1 (next up) — Phase 4 complete
+**Last updated:** 2026-10-04 (finished 4.7)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -46,7 +46,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 4.4 Cohesion
 - [x] 4.5 Limits and balance
 - [x] 4.6 Tuning panel and presets
-- [ ] 4.7 Performance check
+- [x] 4.7 Performance check
 
 ### Phase 5 — Moods (no mic)
 - [ ] 5.1 Mood object
@@ -110,7 +110,21 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 4.3 — alignment: average neighbor velocity, steer toward it (weight 1.0) — (commit pending)
 - step 4.4 — cohesion: steer toward neighbor center of mass (weight 1.0) — 9c8e4e3
 - step 4.5 — flockSettings min/max speed, enforceSpeedLimits, tuned weights, cohesion steer fix — d332dd9
-- step 4.6 — lil-gui Flocking folder + idle/tightSchool/scatter presets — (commit pending)
+- step 4.6 — lil-gui Flocking folder + idle/tightSchool/scatter presets — 418e84d
+- step 4.7 — ?fish=N count param, stats show fish count; perf notes below — (commit pending)
+
+## Phase 4 performance (step 4.7)
+Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.
+
+Test: `npm run dev` then open `?fish=300`, `?fish=600`, `?fish=1000` and read bottom-left FPS.
+
+| fish | FPS (fill in on your machine) | notes |
+|------|-------------------------------|-------|
+| 300  |                               | target: smooth (50+) |
+| 600  |                               | |
+| 1000 |                               | if under 50 FPS, next step would be a uniform spatial grid |
+
+Why no grid yet: at 300 fish the sim should stay smooth on a typical laptop; only add a spatial hash if your 1000-fish test drops below ~50 FPS. A grid buckets fish into cells so each fish only checks nearby buckets instead of all n.
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)

@@ -152,7 +152,8 @@ scene.add(sunLight);
 // ---------------------------------------------------------------------------
 // FISH SCHOOL (steps 3.1–3.3) — InstancedMesh + typed-array flock in flock.js
 // ---------------------------------------------------------------------------
-const fishCount = 40;
+// Step 4.7: try ?fish=300, ?fish=600, ?fish=1000 and watch FPS (O(n²) neighbor loops).
+const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 300;
 
 // ---------------------------------------------------------------------------
 // THE TANK (step 1.8) - the box the fish must stay inside.
@@ -320,6 +321,7 @@ function animate() {
     const fps = framesSinceStatsUpdate / secondsSinceStatsUpdate;
     statsBox.textContent =
       `FPS:        ${fps.toFixed(0)}\n` +
+      `fish:       ${fishCount}\n` +
       `draw calls: ${renderer.info.render.calls}\n` +
       `triangles:  ${renderer.info.render.triangles}`;
     framesSinceStatsUpdate = 0;
