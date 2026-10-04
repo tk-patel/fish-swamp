@@ -2,6 +2,9 @@
 // (scene, camera, renderer) and runs the render loop.
 
 import * as THREE from 'three';
+// OrbitControls is an "addon": it ships inside the three package but is not
+// part of the core THREE object, so we import it from 'three/addons/...'.
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------------------------------------------------------------------------
 // 1. SCENE - the "stage". An empty container that holds everything we want
@@ -17,7 +20,7 @@ const scene = new THREE.Scene();
 //    Arguments:
 //      fov    (50)  - vertical field of view in degrees. Bigger = wider lens.
 //      aspect       - width / height of the canvas. If this is wrong the
-//                     picture looks stretched (we fix resizing in step 0.4).
+//                     picture looks stretched (resize handler below, step 0.4).
 //      near   (0.1) - anything closer than this to the camera is not drawn.
 //      far  (1000)  - anything farther than this is not drawn.
 // ---------------------------------------------------------------------------
@@ -39,8 +42,46 @@ camera.position.z = 5;
 // ---------------------------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+// devicePixelRatio = how many real screen pixels make up one CSS pixel.
+// 1 on a normal monitor, 2 on a Retina/HiDPI screen (a 2x2 block of tiny
+// pixels per CSS pixel). If we ignore it, the canvas is drawn at CSS size
+// and then stretched up by the browser, which looks blurry on Retina.
+// We cap it at 2: phones can report 3+, and drawing 9x the pixels costs a
+// lot of GPU time for a difference your eye can barely see.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 // The renderer created its own <canvas> element; we put it in the page.
 document.querySelector('#app').appendChild(renderer.domElement);
+
+// ---------------------------------------------------------------------------
+// RESIZE - when the window changes size we must update TWO things:
+//   1. The renderer: resize the canvas so it still fills the window.
+//   2. The camera's aspect ratio (width / height). The camera turns the 3D
+//      world into a flat picture using a "projection matrix" (a grid of
+//      numbers that squashes 3D coordinates onto a 2D screen). That matrix
+//      has the aspect ratio baked in. If the window gets wider but the
+//      camera still thinks it is the old shape, the cube looks stretched.
+//      Changing camera.aspect does nothing by itself; we must call
+//      updateProjectionMatrix() so the matrix is recalculated.
+// ---------------------------------------------------------------------------
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------------------------------------------------------------------------
+// ORBIT CONTROLS - lets you move the camera with the mouse:
+//   drag = orbit around the target, scroll = zoom, right-drag = pan.
+// "Orbit" means the camera moves on a sphere around a target point
+// (by default the origin, (0, 0, 0), where the cube is) and always looks at it.
+//
+// Damping adds inertia: after you let go the camera glides to a stop
+// instead of halting instantly. It feels much smoother, but it only works
+// if we call controls.update() every frame (see animate()).
+// ---------------------------------------------------------------------------
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05; // smaller = longer glide
 
 // ---------------------------------------------------------------------------
 // A MESH = geometry + material.
@@ -110,6 +151,10 @@ function animate() {
   // more often, and the cube covers the same angle per real second.
   cube.rotation.x += spinSpeed * deltaSeconds;
   cube.rotation.y += spinSpeed * deltaSeconds;
+
+  // Let OrbitControls apply the damping glide and move the camera.
+  // Must happen before render so this frame uses the new camera position.
+  controls.update();
 
   // Take the picture: draw `scene` as seen by `camera`.
   renderer.render(scene, camera);
