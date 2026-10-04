@@ -63,10 +63,10 @@ const camera = new THREE.PerspectiveCamera(
 // to see all of it. OrbitControls (below) looks at the origin by default.
 //
 // TEMPORARY (step 1.1): a fish is only ~2 units long, so from the full-tank
-// view at (0, 5, 35) it would be a speck. We stay close while we build one
-// fish, off to the side (x = 7) so we see its long side profile instead of
-// looking at its nose head-on. We go back to (0, 5, 35) at step 1.8 (the tank).
-camera.position.set(7, 2, 4);
+// view at (0, 5, 35) it would be a speck. We stay closer while we build one
+// fish. (Step 1.5: moved back and up a little so the whole circle the target
+// travels on, radius 6, fits on screen.) We go back to (0, 5, 35) at step 1.8.
+camera.position.set(0, 12, 18);
 
 // ---------------------------------------------------------------------------
 // 3. RENDERER - the "photographer". It takes the scene + camera and paints
@@ -172,7 +172,8 @@ fish.add(fishAxes);
 // VELOCITY = speed AND direction in one arrow:
 //   - the arrow's direction is where the fish is heading
 //   - the arrow's length is how fast (units per second)
-// Here: 1.5 units/sec along X, 0.3 up, 2.0 along Z.
+// Here: 1.5 units/sec along X, 0.3 up, 2.0 along Z (the STARTING velocity;
+// from step 1.5 on, steering changes it every frame).
 // Its length is sqrt(1.5^2 + 0.3^2 + 2.0^2) = about 2.5 units per second,
 // which is the SPEED. `velocity.length()` gives you that number.
 // ---------------------------------------------------------------------------
@@ -182,6 +183,36 @@ const fishVelocity = new THREE.Vector3(1.5, 0.3, 2.0);
 // We make it once, outside the render loop, and refill it each frame,
 // because creating new objects 60 times a second adds up (garbage collection).
 const fishLookTarget = new THREE.Vector3();
+
+// ---------------------------------------------------------------------------
+// STEERING TOWARD A TARGET (step 1.5)
+//
+// The target: a small bright sphere that travels on a circle, so we can
+// watch the fish chase it. MeshBasicMaterial ignores lights (always shows
+// its plain color), which makes it easy to spot.
+// ---------------------------------------------------------------------------
+const chaseTarget = new THREE.Mesh(
+  new THREE.SphereGeometry(0.3, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0xffee55 }),
+);
+scene.add(chaseTarget);
+
+const targetCircleRadius = 6; // units
+const targetAngularSpeed = 0.5; // radians per second -> 0.5 * 6 = 3 units/s
+
+// The two limits that shape how the fish moves:
+//   maxSpeed         - the fastest the fish can swim (units per second).
+//   maxSteeringForce - how hard the fish can turn/accelerate, measured as
+//                      "how much its velocity arrow may change per second".
+//                      Small = lazy, wide turns (a big whale).
+//                      Large = sharp, twitchy turns (a minnow).
+// The target moves at 3 units/s, and the fish is allowed 4, so it can catch up.
+const maxSpeed = 4;
+const maxSteeringForce = 6;
+
+// Scratch vectors, reused every frame (same reason as fishLookTarget).
+const desiredVelocity = new THREE.Vector3();
+const steeringForce = new THREE.Vector3();
 
 // ---------------------------------------------------------------------------
 // TEMPORARY REFERENCE OBJECTS (sense of depth) - remove once fish exist.
@@ -240,6 +271,52 @@ function animate() {
   // Always move things as `speed (units per second) * deltaSeconds`
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
+
+  // --- Move the target around its circle ---------------------------------
+  // cos and sin of an angle give a point on a circle of radius 1 (x = cos,
+  // z = sin). Multiply by the radius to get our circle. The angle grows
+  // with time: angle = elapsed seconds * radians per second.
+  // y bobs up and down gently (sin again) so the chase is truly 3D.
+  const elapsedSeconds = timer.getElapsed();
+  const targetAngle = elapsedSeconds * targetAngularSpeed;
+  chaseTarget.position.set(
+    Math.cos(targetAngle) * targetCircleRadius,
+    Math.sin(elapsedSeconds * 0.7) * 2,
+    Math.sin(targetAngle) * targetCircleRadius,
+  );
+
+  // --- STEER the fish toward the target (Craig Reynolds' "seek") ----------
+  // We do NOT point the fish at the target and teleport its direction.
+  // A real fish can't turn instantly; it needs time to change its heading.
+  // So we keep the CURRENT velocity and only nudge it, using 3 ideas:
+  //
+  // 1. DESIRED velocity: "if I could, I'd go straight at the target at full
+  //    speed". Direction = (target - me), normalized to length 1 (a pure
+  //    direction), then multiplied by maxSpeed.
+  desiredVelocity
+    .subVectors(chaseTarget.position, fish.position)
+    .normalize()
+    .multiplyScalar(maxSpeed);
+
+  // 2. STEERING = desired - current. It is the arrow that takes the current
+  //    velocity arrow to the desired one: "what correction do I need?"
+  //    If I'm already going the right way and speed, it is ~zero.
+  //    If I'm swimming away from the target, it is big and points sideways
+  //    or backwards, pulling the fish around in a curve.
+  steeringForce.subVectors(desiredVelocity, fishVelocity);
+
+  // 3. LIMIT the steering to maxSteeringForce. Without this the fish would
+  //    apply the whole correction at once and snap to the desired velocity,
+  //    which is exactly the instant turn we wanted to avoid. clampLength(0, m)
+  //    shortens the arrow if it is longer than m (keeping its direction).
+  steeringForce.clampLength(0, maxSteeringForce);
+
+  // Apply the steering as an acceleration: velocity += steering * time.
+  // Same units trick as before: (change per second) * seconds.
+  fishVelocity.addScaledVector(steeringForce, deltaSeconds);
+
+  // Finally cap the speed so the fish can never exceed maxSpeed.
+  fishVelocity.clampLength(0, maxSpeed);
 
   // MOVE the fish: new position = old position + velocity * time passed.
   // velocity is "units per second", deltaSeconds is "seconds", so
