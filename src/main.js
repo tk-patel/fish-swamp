@@ -64,8 +64,8 @@ const camera = new THREE.PerspectiveCamera(
 //
 // TEMPORARY (step 1.1): a fish is only ~2 units long, so from the full-tank
 // view at (0, 5, 35) it would be a speck. We stay closer while we build one
-// fish. (Step 1.5: moved back and up a little so the whole circle the target
-// travels on, radius 6, fits on screen.) We go back to (0, 5, 35) at step 1.8.
+// fish. (Step 1.5: moved back and up a little to see more of the area.)
+// We go back to (0, 5, 35) at step 1.8.
 camera.position.set(0, 12, 18);
 
 // ---------------------------------------------------------------------------
@@ -185,34 +185,74 @@ const fishVelocity = new THREE.Vector3(1.5, 0.3, 2.0);
 const fishLookTarget = new THREE.Vector3();
 
 // ---------------------------------------------------------------------------
-// STEERING TOWARD A TARGET (step 1.5)
+// STEERING (steps 1.5 and 1.7)
 //
-// The target: a small bright sphere that travels on a circle, so we can
-// watch the fish chase it. MeshBasicMaterial ignores lights (always shows
-// its plain color), which makes it easy to spot.
-// ---------------------------------------------------------------------------
-const chaseTarget = new THREE.Mesh(
-  new THREE.SphereGeometry(0.3, 16, 12),
-  new THREE.MeshBasicMaterial({ color: 0xffee55 }),
-);
-scene.add(chaseTarget);
-
-const targetCircleRadius = 6; // units
-const targetAngularSpeed = 0.5; // radians per second -> 0.5 * 6 = 3 units/s
-
 // The two limits that shape how the fish moves:
 //   maxSpeed         - the fastest the fish can swim (units per second).
 //   maxSteeringForce - how hard the fish can turn/accelerate, measured as
 //                      "how much its velocity arrow may change per second".
 //                      Small = lazy, wide turns (a big whale).
 //                      Large = sharp, twitchy turns (a minnow).
-// The target moves at 3 units/s, and the fish is allowed 4, so it can catch up.
-const maxSpeed = 4;
-const maxSteeringForce = 6;
+// ---------------------------------------------------------------------------
+const maxSpeed = 3;
+const maxSteeringForce = 5;
 
 // Scratch vectors, reused every frame (same reason as fishLookTarget).
 const desiredVelocity = new THREE.Vector3();
 const steeringForce = new THREE.Vector3();
+
+// ---------------------------------------------------------------------------
+// WANDER (step 1.7) - swimming around "on its own", with no target.
+//
+// The naive idea: every frame steer in a random direction. That fails: the
+// random direction changes 60 times a second, so the fish just trembles in
+// place (jitter). Real wandering has MEMORY: the fish keeps going roughly the
+// way it was going and its "mind" drifts slowly.
+//
+// Craig Reynolds' trick (the same author as the seek from step 1.5):
+//   1. Imagine an invisible sphere floating a little way IN FRONT of the fish
+//      (its center is `wanderDistance` ahead along the current heading).
+//   2. Keep a "wander point" on the surface of that sphere. This is where the
+//      fish currently feels like going. Then just SEEK that point, exactly
+//      like the old target chase.
+//   3. Every frame, nudge the wander point a tiny random amount, and push it
+//      back onto the sphere's surface. Because it only moves a little each
+//      frame, the change is smooth: the fish drifts into gentle curves and
+//      lazy turns instead of twitching.
+//
+// The sphere's size controls the character:
+//   wanderRadius   - bigger sphere = the point can be far off to the side =
+//                    sharper turns.
+//   wanderDistance - further away = the pull is more "straight ahead" =
+//                    straighter paths.
+//   wanderJitter   - how fast the point wanders around the sphere (units per
+//                    second) = how often it changes its mind.
+// ---------------------------------------------------------------------------
+const wanderDistance = 4;
+const wanderRadius = 2;
+const wanderJitter = 6;
+
+// The wander point, stored as an OFFSET from the sphere's center. Its length
+// is always wanderRadius (so it sits on the surface). Start pointing +Z.
+const wanderOffset = new THREE.Vector3(0, 0, wanderRadius);
+
+// Scratch vectors for working out where the wander point is in the world.
+const wanderSphereCenter = new THREE.Vector3();
+const wanderPoint = new THREE.Vector3();
+
+// TEMPORARY debug visuals (delete when you no longer need them):
+//   - a wireframe sphere showing the invisible wander sphere
+//   - a small red dot showing the current wander point the fish is seeking
+const wanderSphereDebug = new THREE.Mesh(
+  new THREE.SphereGeometry(wanderRadius, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0x66ccff, wireframe: true }),
+);
+scene.add(wanderSphereDebug);
+const wanderPointDebug = new THREE.Mesh(
+  new THREE.SphereGeometry(0.2, 12, 8),
+  new THREE.MeshBasicMaterial({ color: 0xff3355 }),
+);
+scene.add(wanderPointDebug);
 
 // ---------------------------------------------------------------------------
 // SMOOTH ORIENTATION (step 1.6)
@@ -312,29 +352,53 @@ function animate() {
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
 
-  // --- Move the target around its circle ---------------------------------
-  // cos and sin of an angle give a point on a circle of radius 1 (x = cos,
-  // z = sin). Multiply by the radius to get our circle. The angle grows
-  // with time: angle = elapsed seconds * radians per second.
-  // y bobs up and down gently (sin again) so the chase is truly 3D.
-  const elapsedSeconds = timer.getElapsed();
-  const targetAngle = elapsedSeconds * targetAngularSpeed;
-  chaseTarget.position.set(
-    Math.cos(targetAngle) * targetCircleRadius,
-    Math.sin(elapsedSeconds * 0.7) * 2,
-    Math.sin(targetAngle) * targetCircleRadius,
-  );
+  // --- WANDER: pick the point the fish feels like swimming to --------------
+  // a) Nudge the wander point by a small random vector. Math.random() is
+  //    0..1, so (Math.random() - 0.5) * 2 is a random number from -1 to +1,
+  //    one per axis. The size of the nudge is wanderJitter (units/second)
+  //    scaled by time.
+  //    Why Math.sqrt(deltaSeconds) and not deltaSeconds? Random nudges
+  //    cancel each other partly (like a drunk stumbling left and right), so
+  //    after N steps you've drifted about sqrt(N) steps, not N. Scaling
+  //    each nudge by sqrt(delta) makes the wandering look the same at 60 Hz
+  //    and 144 Hz.
+  const wanderNudge = wanderJitter * Math.sqrt(deltaSeconds);
+  wanderOffset.x += (Math.random() - 0.5) * 2 * wanderNudge;
+  wanderOffset.y += (Math.random() - 0.5) * 2 * wanderNudge;
+  wanderOffset.z += (Math.random() - 0.5) * 2 * wanderNudge;
 
-  // --- STEER the fish toward the target (Craig Reynolds' "seek") ----------
-  // We do NOT point the fish at the target and teleport its direction.
+  // b) Push the point back onto the sphere's surface: keep its direction,
+  //    but force its length to be exactly wanderRadius.
+  wanderOffset.setLength(wanderRadius);
+
+  // c) Where is the sphere? Its center is `wanderDistance` ahead of the fish
+  //    along the direction the fish is currently moving
+  //    (velocity normalized = a direction of length 1).
+  wanderSphereCenter
+    .copy(fishVelocity)
+    .normalize()
+    .multiplyScalar(wanderDistance)
+    .add(fish.position);
+
+  // d) The wander point in the world = sphere center + offset.
+  wanderPoint.copy(wanderSphereCenter).add(wanderOffset);
+
+  // (Debug visuals follow the numbers we just computed.)
+  wanderSphereDebug.position.copy(wanderSphereCenter);
+  wanderPointDebug.position.copy(wanderPoint);
+
+  // --- STEER the fish toward the wander point (Reynolds' "seek") ----------
+  // The seek from step 1.5, unchanged except the goal is now the wander
+  // point instead of a chase target.
+  // We do NOT point the fish at the goal and teleport its direction.
   // A real fish can't turn instantly; it needs time to change its heading.
   // So we keep the CURRENT velocity and only nudge it, using 3 ideas:
   //
-  // 1. DESIRED velocity: "if I could, I'd go straight at the target at full
-  //    speed". Direction = (target - me), normalized to length 1 (a pure
+  // 1. DESIRED velocity: "if I could, I'd go straight at the goal at full
+  //    speed". Direction = (goal - me), normalized to length 1 (a pure
   //    direction), then multiplied by maxSpeed.
   desiredVelocity
-    .subVectors(chaseTarget.position, fish.position)
+    .subVectors(wanderPoint, fish.position)
     .normalize()
     .multiplyScalar(maxSpeed);
 
