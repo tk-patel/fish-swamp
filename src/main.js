@@ -5,7 +5,8 @@ import * as THREE from 'three';
 // OrbitControls is an "addon": it ships inside the three package but is not
 // part of the core THREE object, so we import it from 'three/addons/...'.
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createFish, fishWaveUniforms, fishWaveSettings } from './fish.js';
+import { fishWaveUniforms, fishWaveSettings } from './fish.js';
+import { createFlock } from './flock.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -149,60 +150,9 @@ sunLight.position.set(10, 30, 10); // high above, slightly off-center
 scene.add(sunLight);
 
 // ---------------------------------------------------------------------------
-// THE FISH (step 1.1) - built in src/fish.js. We just add the returned Group
-// to the scene. It sits at the origin (0, 0, 0) by default.
+// FISH SCHOOL (steps 3.1–3.3) — InstancedMesh + typed-array flock in flock.js
 // ---------------------------------------------------------------------------
-const fish = createFish();
-scene.add(fish);
-// TEMPORARY (step 1.3): AxesHelper draws three colored lines from the
-// object's origin along its local axes, so you can SEE the directions:
-//   RED   = local +X     GREEN = local +Y     BLUE = local +Z
-// (Memory trick: R-G-B = X-Y-Z.) The argument is the length of each line.
-// We add it to the FISH (not the scene) so it is a child of the fish and
-// turns together with it, which shows the fish's LOCAL axes, not the world's.
-// Our convention (see fish.js): the nose points along the BLUE line.
-const fishAxes = new THREE.AxesHelper(2.5);
-fish.add(fishAxes);
-
-// ---------------------------------------------------------------------------
-// FISH VELOCITY (step 1.4)
-//
-// A THREE.Vector3 is just three numbers (x, y, z). The same type is used for
-// two different ideas, which is a common source of confusion:
-//   - a POINT in space:  "the fish is AT (2, 1, 0)"       -> fish.position
-//   - an ARROW / change: "the fish moves BY (2, 1, 0)/sec" -> velocity
-//
-// VELOCITY = speed AND direction in one arrow:
-//   - the arrow's direction is where the fish is heading
-//   - the arrow's length is how fast (units per second)
-// Here: 1.5 units/sec along X, 0.3 up, 2.0 along Z (the STARTING velocity;
-// from step 1.5 on, steering changes it every frame).
-// Its length is sqrt(1.5^2 + 0.3^2 + 2.0^2) = about 2.5 units per second,
-// which is the SPEED. `velocity.length()` gives you that number.
-// ---------------------------------------------------------------------------
-const fishVelocity = new THREE.Vector3(1.5, 0.3, 2.0);
-
-// A reusable scratch Vector3 for "the point the fish should look at".
-// We make it once, outside the render loop, and refill it each frame,
-// because creating new objects 60 times a second adds up (garbage collection).
-const fishLookTarget = new THREE.Vector3();
-
-// ---------------------------------------------------------------------------
-// STEERING (steps 1.5 and 1.7)
-//
-// The two limits that shape how the fish moves:
-//   maxSpeed         - the fastest the fish can swim (units per second).
-//   maxSteeringForce - how hard the fish can turn/accelerate, measured as
-//                      "how much its velocity arrow may change per second".
-//                      Small = lazy, wide turns (a big whale).
-//                      Large = sharp, twitchy turns (a minnow).
-// ---------------------------------------------------------------------------
-const maxSpeed = 3;
-const maxSteeringForce = 5;
-
-// Scratch vectors, reused every frame (same reason as fishLookTarget).
-const desiredVelocity = new THREE.Vector3();
-const steeringForce = new THREE.Vector3();
+const fishCount = 40;
 
 // ---------------------------------------------------------------------------
 // THE TANK (step 1.8) - the box the fish must stay inside.
@@ -220,7 +170,6 @@ const steeringForce = new THREE.Vector3();
 //     steering arrow, added to the same sum as wander.
 // ---------------------------------------------------------------------------
 const tankSize = new THREE.Vector3(40, 20, 30);
-const tankHalfSize = tankSize.clone().multiplyScalar(0.5); // (20, 10, 15)
 
 // TEMPORARY wireframe so we can see the tank. BoxGeometry has two triangles
 // per face; EdgesGeometry keeps only the real box edges (12 lines) so we do
@@ -231,131 +180,15 @@ const tankWireframe = new THREE.LineSegments(
 );
 scene.add(tankWireframe);
 
-// How close to a wall before the fish starts to feel it (units). Further than
-// this from every wall = no boundary force at all.
-const boundaryMargin = 5;
+const flock = createFlock(fishCount, tankSize);
+scene.add(flock.mesh);
+scene.add(flock.perceptionSphereDebug);
 
-// How strongly the boundary pushes, compared to the fish's own wishes.
-// It is much bigger than maxSteeringForce (5) on purpose: right next to the
-// wall the boundary must WIN against the wander/seek pull, which can be up
-// to about 6. The final total is still clamped to maxSteeringForce, so the
-// fish turns at its normal rate; this number only decides who gets priority.
-const boundaryWeight = 30;
-
-const boundaryForce = new THREE.Vector3(); // scratch, reused every frame
-
-// For ONE axis: how hard should the fish be pushed back from the walls?
-//   coordinate: the fish's position on this axis (e.g. its x)
-//   halfExtent: distance from the center to the wall on this axis (e.g. 20)
-// Returns a number from -1 to +1:
-//   0   = far from both walls (no push)
-//   -1  = touching the + wall (push fully towards -)
-//   +1  = touching the - wall (push fully towards +)
-function getAxisBoundaryPush(coordinate, halfExtent) {
-  // How far past the start of the "danger zone" is the fish? The zone begins
-  // `boundaryMargin` units before the wall.
-  const distanceIntoZone = Math.abs(coordinate) - (halfExtent - boundaryMargin);
-  if (distanceIntoZone <= 0) {
-    return 0; // still in the safe middle: no push
-  }
-  // 0 at the edge of the zone, 1 at the wall, and beyond the wall we keep
-  // it at 1 (Math.min), so a fish that overshoots is still pushed hard.
-  const strength = Math.min(distanceIntoZone / boundaryMargin, 1);
-  // Push TOWARDS the center: opposite to the side the fish is on.
-  // Math.sign gives +1 for positive numbers and -1 for negative ones.
-  return -Math.sign(coordinate) * strength;
-}
-
-// ---------------------------------------------------------------------------
-// WANDER (step 1.7) - swimming around "on its own", with no target.
-//
-// The naive idea: every frame steer in a random direction. That fails: the
-// random direction changes 60 times a second, so the fish just trembles in
-// place (jitter). Real wandering has MEMORY: the fish keeps going roughly the
-// way it was going and its "mind" drifts slowly.
-//
-// Craig Reynolds' trick (the same author as the seek from step 1.5):
-//   1. Imagine an invisible sphere floating a little way IN FRONT of the fish
-//      (its center is `wanderDistance` ahead along the current heading).
-//   2. Keep a "wander point" on the surface of that sphere. This is where the
-//      fish currently feels like going. Then just SEEK that point, exactly
-//      like the old target chase.
-//   3. Every frame, nudge the wander point a tiny random amount, and push it
-//      back onto the sphere's surface. Because it only moves a little each
-//      frame, the change is smooth: the fish drifts into gentle curves and
-//      lazy turns instead of twitching.
-//
-// The sphere's size controls the character:
-//   wanderRadius   - bigger sphere = the point can be far off to the side =
-//                    sharper turns.
-//   wanderDistance - further away = the pull is more "straight ahead" =
-//                    straighter paths.
-//   wanderJitter   - how fast the point wanders around the sphere (units per
-//                    second) = how often it changes its mind.
-// ---------------------------------------------------------------------------
-const wanderDistance = 4;
-const wanderRadius = 2;
-const wanderJitter = 6;
-
-// The wander point, stored as an OFFSET from the sphere's center. Its length
-// is always wanderRadius (so it sits on the surface). Start pointing +Z.
-const wanderOffset = new THREE.Vector3(0, 0, wanderRadius);
-
-// Scratch vectors for working out where the wander point is in the world.
-const wanderSphereCenter = new THREE.Vector3();
-const wanderPoint = new THREE.Vector3();
-
-// TEMPORARY debug visuals (delete when you no longer need them):
-//   - a wireframe sphere showing the invisible wander sphere
-//   - a small red dot showing the current wander point the fish is seeking
-const wanderSphereDebug = new THREE.Mesh(
-  new THREE.SphereGeometry(wanderRadius, 16, 12),
-  new THREE.MeshBasicMaterial({ color: 0x66ccff, wireframe: true }),
-);
-scene.add(wanderSphereDebug);
-const wanderPointDebug = new THREE.Mesh(
-  new THREE.SphereGeometry(0.2, 12, 8),
-  new THREE.MeshBasicMaterial({ color: 0xff3355 }),
-);
-scene.add(wanderPointDebug);
-
-// ---------------------------------------------------------------------------
-// SMOOTH ORIENTATION (step 1.6)
-//
-// Why isn't lookAt enough? `fish.lookAt(x)` replaces the fish's rotation with
-// the one facing x, instantly. While the velocity changes slowly (like now)
-// that looks fine, but ANY sudden change in velocity (a collision, a flee
-// force, the keypress below) makes the nose snap. Fish bodies are heavy: we
-// want the body to ease towards the new heading instead.
-//
-// QUATERNIONS in plain terms: a rotation can be stored as three Euler angles
-// (x, y, z - "turn this much around X, then Y, then Z" - which is what
-// fish.rotation holds), or as a QUATERNION: four numbers that describe
-// "rotate by this angle around this axis" in one go. Euler angles are easy to
-// read but bad to blend: the order matters, and in some poses two of the
-// three axes line up ("gimbal lock") so you lose a way to rotate and the
-// interpolation takes weird detours. Quaternions have no such problem and
-// blend cleanly along the shortest path. That's why Three.js stores every
-// object's rotation as a quaternion internally (fish.quaternion), and
-// fish.rotation is just a friendlier view of it.
-// You never need to read the four numbers; you only combine and slerp them.
-// ---------------------------------------------------------------------------
-const turnRate = 5; // bigger = snappier turns. Try 1 (lazy) to 20 (almost instant).
-const worldUp = new THREE.Vector3(0, 1, 0);
-const lookMatrix = new THREE.Matrix4(); // scratch, reused every frame
-const targetQuaternion = new THREE.Quaternion(); // scratch, reused every frame
-
-// TEMPORARY keys for comparing the two versions side by side:
-//   L = toggle between abrupt lookAt and smooth slerp
-//   R = REVERSE the fish's velocity (a sudden 180-degree change of mind)
-let useSmoothTurning = true;
+// Step 4.1 debug: N cycles which fish is highlighted (magenta) and tints neighbors cyan.
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'l' || event.key === 'L') {
-    useSmoothTurning = !useSmoothTurning;
-    console.log(useSmoothTurning ? 'turning: smooth (slerp)' : 'turning: abrupt (lookAt)');
-  }
-  if (event.key === 'r' || event.key === 'R') {
-    fishVelocity.negate(); // (x, y, z) -> (-x, -y, -z)
+  if (event.key === 'n' || event.key === 'N') {
+    flock.cycleWatchFish();
+    console.log(`watching fish #${flock.watchFishIndex()}, neighbors: ${flock.neighborCount()}`);
   }
 });
 
@@ -389,6 +222,9 @@ scene.add(referenceFloor);
 // triangles easily, but the CPU can only SEND maybe a few thousand draw calls
 // per frame before the frame rate drops. So "many small meshes" is slow
 // even if every mesh is tiny.
+//
+// Step 3.1: all 300 fish are ONE InstancedMesh = one fish draw call (plus
+// the tank wireframe, grid floor, lights, ...).
 // ---------------------------------------------------------------------------
 const statsBox = document.createElement('div');
 statsBox.style.cssText =
@@ -415,29 +251,6 @@ waveFolder.add(fishWaveSettings, 'speed', 0, 25, 0.1).name('speed (rad/s)');
 
 let framesSinceStatsUpdate = 0;
 let secondsSinceStatsUpdate = 0;
-
-// ---------------------------------------------------------------------------
-// STRESS TEST (step 2.3) - TEMPORARY. Open the page as
-//   http://localhost:5173/?stress=200
-// to add 200 EXTRA fish and watch the numbers above. Without the "?stress="
-// part you get just the one swimming fish. These extra fish do not swim
-// around; they just hover, which is enough to show the cost of rendering
-// them. (Step 2.3 measured this with the 4-mesh fish; since step 2.4 each
-// fish is ONE mesh, so the draw calls are 4x lower. Compare!)
-// ---------------------------------------------------------------------------
-const stressFishCount = Number(new URLSearchParams(window.location.search).get('stress')) || 0;
-for (let i = 0; i < stressFishCount; i++) {
-  const extraFish = createFish();
-  // Random spot inside the tank: Math.random() is 0..1, so (r - 0.5) is
-  // -0.5..0.5, and times the tank size gives a random point in the box.
-  extraFish.position.set(
-    (Math.random() - 0.5) * tankSize.x,
-    (Math.random() - 0.5) * tankSize.y,
-    (Math.random() - 0.5) * tankSize.z,
-  );
-  extraFish.rotation.y = Math.random() * Math.PI * 2; // random heading
-  scene.add(extraFish);
-}
 
 // ---------------------------------------------------------------------------
 // TIMER - measures real time between frames.
@@ -471,140 +284,7 @@ function animate() {
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
 
-  // --- WANDER: pick the point the fish feels like swimming to --------------
-  // a) Nudge the wander point by a small random vector. Math.random() is
-  //    0..1, so (Math.random() - 0.5) * 2 is a random number from -1 to +1,
-  //    one per axis. The size of the nudge is wanderJitter (units/second)
-  //    scaled by time.
-  //    Why Math.sqrt(deltaSeconds) and not deltaSeconds? Random nudges
-  //    cancel each other partly (like a drunk stumbling left and right), so
-  //    after N steps you've drifted about sqrt(N) steps, not N. Scaling
-  //    each nudge by sqrt(delta) makes the wandering look the same at 60 Hz
-  //    and 144 Hz.
-  const wanderNudge = wanderJitter * Math.sqrt(deltaSeconds);
-  wanderOffset.x += (Math.random() - 0.5) * 2 * wanderNudge;
-  wanderOffset.y += (Math.random() - 0.5) * 2 * wanderNudge;
-  wanderOffset.z += (Math.random() - 0.5) * 2 * wanderNudge;
-
-  // b) Push the point back onto the sphere's surface: keep its direction,
-  //    but force its length to be exactly wanderRadius.
-  wanderOffset.setLength(wanderRadius);
-
-  // c) Where is the sphere? Its center is `wanderDistance` ahead of the fish
-  //    along the direction the fish is currently moving
-  //    (velocity normalized = a direction of length 1).
-  wanderSphereCenter
-    .copy(fishVelocity)
-    .normalize()
-    .multiplyScalar(wanderDistance)
-    .add(fish.position);
-
-  // d) The wander point in the world = sphere center + offset.
-  wanderPoint.copy(wanderSphereCenter).add(wanderOffset);
-
-  // (Debug visuals follow the numbers we just computed.)
-  wanderSphereDebug.position.copy(wanderSphereCenter);
-  wanderPointDebug.position.copy(wanderPoint);
-
-  // --- STEER the fish toward the wander point (Reynolds' "seek") ----------
-  // The seek from step 1.5, unchanged except the goal is now the wander
-  // point instead of a chase target.
-  // We do NOT point the fish at the goal and teleport its direction.
-  // A real fish can't turn instantly; it needs time to change its heading.
-  // So we keep the CURRENT velocity and only nudge it, using 3 ideas:
-  //
-  // 1. DESIRED velocity: "if I could, I'd go straight at the goal at full
-  //    speed". Direction = (goal - me), normalized to length 1 (a pure
-  //    direction), then multiplied by maxSpeed.
-  desiredVelocity
-    .subVectors(wanderPoint, fish.position)
-    .normalize()
-    .multiplyScalar(maxSpeed);
-
-  // 2. STEERING = desired - current. It is the arrow that takes the current
-  //    velocity arrow to the desired one: "what correction do I need?"
-  //    If I'm already going the right way and speed, it is ~zero.
-  //    If I'm swimming away from the target, it is big and points sideways
-  //    or backwards, pulling the fish around in a curve.
-  steeringForce.subVectors(desiredVelocity, fishVelocity);
-
-  // 2b. STAY IN THE TANK (step 1.8): add the boundary push to the same sum.
-  //     Steering forces are just arrows, so combining behaviors = adding
-  //     arrows (the flock will add separation, alignment, ... the same way).
-  //     Each axis is independent, so near a corner two or three axes push at
-  //     once and the fish is nudged away from all the nearby walls.
-  boundaryForce.set(
-    getAxisBoundaryPush(fish.position.x, tankHalfSize.x),
-    getAxisBoundaryPush(fish.position.y, tankHalfSize.y),
-    getAxisBoundaryPush(fish.position.z, tankHalfSize.z),
-  );
-  steeringForce.addScaledVector(boundaryForce, boundaryWeight);
-
-  // 3. LIMIT the steering to maxSteeringForce. Without this the fish would
-  //    apply the whole correction at once and snap to the desired velocity,
-  //    which is exactly the instant turn we wanted to avoid. clampLength(0, m)
-  //    shortens the arrow if it is longer than m (keeping its direction).
-  steeringForce.clampLength(0, maxSteeringForce);
-
-  // Apply the steering as an acceleration: velocity += steering * time.
-  // Same units trick as before: (change per second) * seconds.
-  fishVelocity.addScaledVector(steeringForce, deltaSeconds);
-
-  // Finally cap the speed so the fish can never exceed maxSpeed.
-  fishVelocity.clampLength(0, maxSpeed);
-
-  // MOVE the fish: new position = old position + velocity * time passed.
-  // velocity is "units per second", deltaSeconds is "seconds", so
-  // velocity * deltaSeconds is "units to move in THIS frame". E.g. at
-  // 2.5 units/s and a 60 Hz frame (0.0167 s) the fish moves ~0.04 units.
-  // addScaledVector(v, s) does exactly `position += v * s` in one call,
-  // without creating a temporary vector.
-  fish.position.addScaledVector(fishVelocity, deltaSeconds);
-
-  // POINT the fish along its velocity. Our convention is that the nose is
-  // local +Z (see fish.js). The point one velocity-arrow ahead of the fish
-  // is exactly "where it is going": position + velocity.
-  fishLookTarget.copy(fish.position).add(fishVelocity);
-
-  if (useSmoothTurning) {
-    // SMOOTH version (step 1.6): work out the rotation we WANT, then move the
-    // fish's current rotation only PART of the way there each frame.
-    //
-    // a) Build the target rotation without touching the fish yet.
-    //    Matrix4.lookAt(eye, target, up) builds a rotation matrix (a 3x3
-    //    grid of numbers describing a rotation, here inside a 4x4 matrix)
-    //    whose Z axis points from `target` to `eye`. Object3D.lookAt uses it
-    //    with the two swapped, so we do the same: this makes the +Z axis
-    //    (the nose) point from the fish towards the look-ahead point.
-    //    `up` = (0, 1, 0) tells it which way is "up" so the fish keeps its
-    //    back on top and does not roll onto its side.
-    lookMatrix.lookAt(fishLookTarget, fish.position, worldUp);
-    //    Convert that matrix into a quaternion (see the QUATERNIONS notes
-    //    near the top of this block's setup, "SMOOTH ORIENTATION").
-    targetQuaternion.setFromRotationMatrix(lookMatrix);
-
-    // b) slerp = "spherical linear interpolation": the quaternion version of
-    //    lerp (linear interpolation, "a bit of the way from A to B").
-    //    slerp(target, t) moves the current rotation a fraction t of the way
-    //    to `target` along the shortest turn. t = 0 means don't move,
-    //    t = 1 means jump all the way (which is what plain lookAt does).
-    //
-    //    t must depend on delta time, or turning speed would depend on the
-    //    frame rate. 1 - exp(-rate * delta) is the standard fix: each
-    //    second the remaining angle shrinks by the same proportion, no
-    //    matter how many frames that second is cut into. (This exact trick
-    //    returns in step 5.5 for smoothing the moods.)
-    const turnBlend = 1 - Math.exp(-turnRate * deltaSeconds);
-    fish.quaternion.slerp(targetQuaternion, turnBlend);
-  } else {
-    // ABRUPT version (what we had in steps 1.4 and 1.5): jump straight to
-    // facing the look-ahead point. Press L in the browser to switch.
-    fish.lookAt(fishLookTarget);
-  }
-
-  // Advance the swim wave: phase += (radians per second) * seconds.
-  // The GPU does the actual wiggling; see addSwimWiggleToMaterial in fish.js.
-  fishWaveUniforms.uPhase.value += fishWaveSettings.speed * deltaSeconds;
+  flock.update(deltaSeconds);
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.

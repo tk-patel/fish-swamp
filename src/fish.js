@@ -218,20 +218,10 @@ export const fishWaveUniforms = {
   // Distance along the body for one full S-curve. Fish are ~2.8 long, so 3.0
   // means "about one S-curve along the whole body".
   uWavelength: { value: 3.0 },
-  // How far through the wave cycle we are, in radians. Grows over time (main.js
-  // adds speed * deltaSeconds each frame). See the note below for why this is
-  // an accumulated "phase" and not a plain clock.
-  uPhase: { value: 0 },
 };
 
-// How fast the wave travels, in radians per second (9 rad/s = ~1.4 beats per
-// second). This one is NOT a uniform: it only changes how fast uPhase grows.
-//
-// Why not give the shader `time` and `speed` and compute time * speed there?
-// Because dragging the speed slider would then make time * speed JUMP, and the
-// body would visibly snap. Accumulating phase += speed * delta on the CPU
-// means a new speed only changes how fast the phase grows from now on - the
-// same trick as the tail-wag phase in step 2.2.
+// Base wave travel speed (rad/s). Each fish also scales phase growth by its
+// swim speed (step 3.4) via the per-instance aWiggleMul attribute.
 export const fishWaveSettings = {
   speed: 9.0,
 };
@@ -243,16 +233,15 @@ function addSwimWiggleToMaterial(material) {
     // Give the shader access to our uniform objects.
     shader.uniforms.uAmplitude = fishWaveUniforms.uAmplitude;
     shader.uniforms.uWavelength = fishWaveUniforms.uWavelength;
-    shader.uniforms.uPhase = fishWaveUniforms.uPhase;
 
-    // 1) Declare the uniforms at the top of the vertex shader, so GLSL knows
-    //    they exist and are single float numbers.
+    // Per-instance attributes (InstancedBufferAttribute on the geometry, step 3.4).
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
       `#include <common>
        uniform float uAmplitude;
        uniform float uWavelength;
-       uniform float uPhase;`,
+       attribute float aPhase;
+       attribute float aWiggleMul;`,
     );
 
     // 2) Add the wiggle right after the vertex position is created.
@@ -285,41 +274,73 @@ function addSwimWiggleToMaterial(material) {
        //            the wave, so the body bends into an S-shape.
        //            k = 2*PI / wavelength (radians of wave per unit length).
        //            Short wavelength = many tight ripples; long = one lazy bend.
-       //  - phase : grows with time, which slides the whole pattern along so
-       //            the S-shape travels instead of standing still.
-       // With '+ phase' the crests move towards smaller z, i.e. from the nose
-       // towards the tail - the way a real swimming wave travels. (The
-       // textbook form is z*k - t*w; our nose is +Z, so the sign flips.)
+       //  - aPhase : per-fish phase (random start, advanced on CPU each frame).
+       //  - aWiggleMul : scales wag with this fish's swim speed (0..1-ish).
        float waveNumber = 6.28318530718 / uWavelength;
-       float wavePhase = transformed.z * waveNumber + uPhase;
+       float wavePhase = transformed.z * waveNumber + aPhase;
 
-       // Push the vertex sideways (X) by the wave height, scaled by how much
-       // this part of the body is allowed to move. NOTE: we only move the
-       // positions, not the lighting normals, so shading is very slightly
-       // off on the bent parts. Invisible at this size.
-       transformed.x += sin(wavePhase) * uAmplitude * tailWeight;`,
+       transformed.x += sin(wavePhase) * uAmplitude * tailWeight * aWiggleMul;`,
     );
   };
 }
 
 // Build the geometry and material ONCE and share them between every fish.
 // Many meshes can point at the same geometry/material, so 1000 fish do not
-// need 1000 copies of the same 640 vertices. (Instancing in phase 3 takes
-// this idea all the way.)
+// need 1000 copies of the same 640 vertices. InstancedMesh (step 3.1) goes
+// further: one draw call tells the GPU "draw this mesh N times", each copy
+// at a different position/rotation stored in instanceMatrix.
 let sharedFishGeometry = null;
 let sharedFishMaterial = null;
+
+function ensureSharedFishAssets() {
+  if (sharedFishGeometry !== null) {
+    return;
+  }
+  sharedFishGeometry = createFishGeometry();
+  // vertexColors: true tells the material to use the 'color' attribute we
+  // painted above instead of one flat color for the whole mesh.
+  sharedFishMaterial = new THREE.MeshStandardMaterial({ vertexColors: true });
+  addSwimWiggleToMaterial(sharedFishMaterial);
+}
 
 /**
  * Creates one fish and returns it as a single THREE.Mesh.
  * (Before step 2.4 this returned a Group with several meshes inside.)
  */
 export function createFish() {
-  if (sharedFishGeometry === null) {
-    sharedFishGeometry = createFishGeometry();
-    // vertexColors: true tells the material to use the 'color' attribute we
-    // painted above instead of one flat color for the whole mesh.
-    sharedFishMaterial = new THREE.MeshStandardMaterial({ vertexColors: true });
-    addSwimWiggleToMaterial(sharedFishMaterial);
-  }
+  ensureSharedFishAssets();
   return new THREE.Mesh(sharedFishGeometry, sharedFishMaterial);
+}
+
+/**
+ * Empty InstancedMesh shell — flock.js fills instanceMatrix each frame from
+ * typed-array positions and quaternions (steps 3.2–3.3).
+ */
+export function createFishInstancedMesh(instanceCount) {
+  ensureSharedFishAssets();
+
+  const swimPhases = new Float32Array(instanceCount);
+  const wiggleMul = new Float32Array(instanceCount);
+  for (let i = 0; i < instanceCount; i++) {
+    swimPhases[i] = Math.random() * Math.PI * 2;
+    wiggleMul[i] = 1;
+  }
+
+  const phaseAttr = new THREE.InstancedBufferAttribute(swimPhases, 1);
+  phaseAttr.setUsage(THREE.DynamicDrawUsage);
+  const wiggleAttr = new THREE.InstancedBufferAttribute(wiggleMul, 1);
+  wiggleAttr.setUsage(THREE.DynamicDrawUsage);
+  sharedFishGeometry.setAttribute('aPhase', phaseAttr);
+  sharedFishGeometry.setAttribute('aWiggleMul', wiggleAttr);
+
+  const mesh = new THREE.InstancedMesh(
+    sharedFishGeometry,
+    sharedFishMaterial,
+    instanceCount,
+  );
+  mesh.userData.swimPhases = swimPhases;
+  mesh.userData.wiggleMul = wiggleMul;
+  mesh.userData.phaseAttribute = phaseAttr;
+  mesh.userData.wiggleAttribute = wiggleAttr;
+  return mesh;
 }

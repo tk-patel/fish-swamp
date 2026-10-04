@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 3.1 (next up) — Phase 2 complete
-**Last updated:** 2026-10-04 (finished 2.6)
+**Current step:** 4.5 (next up)
+**Last updated:** 2026-10-04 (finished 4.4)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -33,17 +33,17 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 2.6 Tune the wave with sliders
 
 ### Phase 3 — Instancing
-- [ ] 3.1 InstancedMesh, static positions
-- [ ] 3.2 Typed-array fish state
-- [ ] 3.3 Move all fish with wander
-- [ ] 3.4 Per-fish phase/speed attributes
-- [ ] 3.5 Per-fish color and size
+- [x] 3.1 InstancedMesh, static positions
+- [x] 3.2 Typed-array fish state
+- [x] 3.3 Move all fish with wander
+- [x] 3.4 Per-fish phase/speed attributes
+- [x] 3.5 Per-fish color and size
 
 ### Phase 4 — Boids
-- [ ] 4.1 Neighbor search
-- [ ] 4.2 Separation
-- [ ] 4.3 Alignment
-- [ ] 4.4 Cohesion
+- [x] 4.1 Neighbor search
+- [x] 4.2 Separation
+- [x] 4.3 Alignment
+- [x] 4.4 Cohesion
 - [ ] 4.5 Limits and balance
 - [ ] 4.6 Tuning panel and presets
 - [ ] 4.7 Performance check
@@ -100,6 +100,15 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 2.4 — createFish() now returns ONE Mesh built from a custom BufferGeometry (40 rings x 16 sides, egg body -> thin stalk -> flat fin, vertex colors, shared geometry+material). Eyes dropped. The CPU tail wag (2.1/2.2), its lil-gui panel and the arrow keys were removed (no tail pivot any more; lil-gui stays installed for 2.6). ?stress=1000: 3933 calls / 58 FPS (4-mesh fish) -> ~997 calls / 120 FPS (single mesh). The fish does not wiggle again until 2.5 — commit: d0597b2
 - step 2.5 — onBeforeCompile injects GLSL after <begin_vertex> in MeshStandardMaterial: transformed.x += sin(z * k + uTime * speed) * amplitude * tailWeight (linear ramp, head still at z>=0.8, full at tail tip); uTime uniform updated in animate(); constants amplitude 0.35, wavelength 3.0, speed 9 rad/s — sign is + (not - as written generically in PLAN) because our nose is +Z and the wave must travel head -> tail; all fish share one uniform so they wiggle in lockstep until 3.4 — commit: 5e5bef4
 - step 2.6 — wave tuning panel (lil-gui 'Swim wave': amplitude, wavelength, speed); tail weight now 1 - smoothstep(tailTip, headZ, z) instead of a linear ramp; the shader uses uniforms uAmplitude / uWavelength / uPhase; uTime replaced by an accumulated uPhase (phase += speed * delta on the CPU) so moving the speed slider does not make the body snap — commit: 47ba044
+- step 3.1 — createFishInstancedMesh(300): random positions/headings in tank, shared geo+material; removed single swimming fish, ?stress=, axes helper, wander debug; wander/steer code kept but paused until 3.3 — (commit pending)
+- step 3.2 — src/flock.js: Float32Array positions/velocities/orientations/wanderOffsets; matrices written from arrays — (commit pending)
+- step 3.3 — flock.update(): per-fish wander, tank bounds, velocity steering, quaternion slerp → setMatrixAt each frame; main.js steering block removed — (commit pending)
+- step 3.4 — InstancedBufferAttribute aPhase + aWiggleMul; per-fish phase advanced in flock from swim speed; dropped global uPhase — (commit pending)
+- step 3.5 — setColorAt random orange palette; per-fish scale 0.7–1.3 on instance matrix — (commit pending)
+- step 4.1 — findNeighbors() with dist² < r²; debug watch fish (magenta), neighbors (cyan), wire perception sphere; N key cycles watch index — (commit pending)
+- step 4.2 — separation steering (away vector / dist²), averaged, weighted 1.8, summed with wander + bounds before clamp — (commit pending)
+- step 4.3 — alignment: average neighbor velocity, steer toward it (weight 1.0) — (commit pending)
+- step 4.4 — cohesion: steer toward neighbor center of mass (weight 1.0) — (commit pending)
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
