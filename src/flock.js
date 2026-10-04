@@ -20,6 +20,41 @@ const wanderRadius = 2;
 const wanderJitter = 6;
 const turnRate = 5;
 
+// Step 4.6 presets (hand-tuned; Phase 5 moods will target these):
+//   idle:        wander 1.2, sep 1.2, align 0.6, coh 0.5, maxSpeed 2.2, perception 7
+//   tightSchool: wander 0.4, sep 1.0, align 1.4, coh 1.6, maxSpeed 2.5, perception 10
+//   scatter:     wander 1.5, sep 2.5, align 0.2, coh 0.1, maxSpeed 3.2, perception 6
+export const flockPresets = {
+  idle: {
+    wanderWeight: 1.2,
+    separationWeight: 1.2,
+    alignmentWeight: 0.6,
+    cohesionWeight: 0.5,
+    maxSpeed: 2.2,
+    perceptionRadius: 7,
+  },
+  tightSchool: {
+    wanderWeight: 0.4,
+    separationWeight: 1.0,
+    alignmentWeight: 1.4,
+    cohesionWeight: 1.6,
+    maxSpeed: 2.5,
+    perceptionRadius: 10,
+  },
+  scatter: {
+    wanderWeight: 1.5,
+    separationWeight: 2.5,
+    alignmentWeight: 0.2,
+    cohesionWeight: 0.1,
+    maxSpeed: 3.2,
+    perceptionRadius: 6,
+  },
+};
+
+export function applyFlockPreset(preset) {
+  Object.assign(flockSettings, preset);
+}
+
 // Step 4.5: speed floor + ceiling and gentler boid weights to reduce jitter/stalls.
 export const flockSettings = {
   minSpeed: 0.9,

@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // part of the core THREE object, so we import it from 'three/addons/...'.
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
-import { createFlock } from './flock.js';
+import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -248,6 +248,25 @@ const waveFolder = gui.addFolder('Swim wave');
 waveFolder.add(fishWaveUniforms.uAmplitude, 'value', 0, 1, 0.01).name('amplitude');
 waveFolder.add(fishWaveUniforms.uWavelength, 'value', 0.5, 8, 0.1).name('wavelength');
 waveFolder.add(fishWaveSettings, 'speed', 0, 25, 0.1).name('speed (rad/s)');
+
+// Step 4.6 — live flock tuning (presets in flock.js flockPresets).
+const flockFolder = gui.addFolder('Flocking');
+flockFolder.add(flockSettings, 'separationWeight', 0, 4, 0.05).name('separation');
+flockFolder.add(flockSettings, 'alignmentWeight', 0, 3, 0.05).name('alignment');
+flockFolder.add(flockSettings, 'cohesionWeight', 0, 3, 0.05).name('cohesion');
+flockFolder.add(flockSettings, 'wanderWeight', 0, 3, 0.05).name('wander');
+flockFolder.add(flockSettings, 'maxSpeed', 0.5, 5, 0.1).name('max speed');
+flockFolder.add(flockSettings, 'minSpeed', 0.2, 2, 0.05).name('min speed');
+flockFolder.add(flockSettings, 'maxSteeringForce', 1, 10, 0.25).name('max steer');
+flockFolder.add(flockSettings, 'perceptionRadius', 2, 16, 0.5).name('perception');
+const presetActions = {
+  idle: () => applyFlockPreset(flockPresets.idle),
+  tightSchool: () => applyFlockPreset(flockPresets.tightSchool),
+  scatter: () => applyFlockPreset(flockPresets.scatter),
+};
+flockFolder.add(presetActions, 'idle').name('preset: idle');
+flockFolder.add(presetActions, 'tightSchool').name('preset: tight school');
+flockFolder.add(presetActions, 'scatter').name('preset: scatter');
 
 let framesSinceStatsUpdate = 0;
 let secondsSinceStatsUpdate = 0;
