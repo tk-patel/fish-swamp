@@ -5,7 +5,10 @@ import * as THREE from 'three';
 // OrbitControls is an "addon": it ships inside the three package but is not
 // part of the core THREE object, so we import it from 'three/addons/...'.
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createFish, fishWaveUniforms } from './fish.js';
+import { createFish, fishWaveUniforms, fishWaveSettings } from './fish.js';
+// lil-gui draws a small control panel (sliders, checkboxes) in the corner of
+// the page. We use it to tweak numbers live instead of edit-save-reload.
+import GUI from 'lil-gui';
 
 // ---------------------------------------------------------------------------
 // 1. SCENE - the "stage". An empty container that holds everything we want
@@ -393,6 +396,23 @@ statsBox.style.cssText =
   'color:#cfefff;font:12px/1.4 monospace;pointer-events:none;white-space:pre;';
 document.body.appendChild(statsBox);
 
+// ---------------------------------------------------------------------------
+// TUNING PANEL (step 2.6) - lil-gui. `gui.add(object, 'property', min, max,
+// step)` makes a slider that edits object.property live. Our shader reads the
+// uniform objects every frame, so moving a slider changes the fish instantly.
+//
+//   amplitude  - how far the tail swings sideways. 0 = a stiff fish.
+//   wavelength - how much of the S-curve fits along the body. Small = tight
+//                ripples (an eel / snake), large = one gentle bend (a tuna).
+//                Roughly: wavelength near the body length (~3) looks natural.
+//   speed      - how fast the wave travels = how quickly the tail beats.
+// ---------------------------------------------------------------------------
+const gui = new GUI();
+const waveFolder = gui.addFolder('Swim wave');
+waveFolder.add(fishWaveUniforms.uAmplitude, 'value', 0, 1, 0.01).name('amplitude');
+waveFolder.add(fishWaveUniforms.uWavelength, 'value', 0.5, 8, 0.1).name('wavelength');
+waveFolder.add(fishWaveSettings, 'speed', 0, 25, 0.1).name('speed (rad/s)');
+
 let framesSinceStatsUpdate = 0;
 let secondsSinceStatsUpdate = 0;
 
@@ -582,9 +602,9 @@ function animate() {
     fish.lookAt(fishLookTarget);
   }
 
-  // Tell the fish's vertex shader what time it is (seconds since start).
+  // Advance the swim wave: phase += (radians per second) * seconds.
   // The GPU does the actual wiggling; see addSwimWiggleToMaterial in fish.js.
-  fishWaveUniforms.uTime.value = timer.getElapsed();
+  fishWaveUniforms.uPhase.value += fishWaveSettings.speed * deltaSeconds;
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.

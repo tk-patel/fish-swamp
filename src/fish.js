@@ -208,31 +208,51 @@ function createFishGeometry() {
 // put our own code right after it.
 //
 // UNIFORMS: a value that is the SAME for every vertex in a draw call, set
-// from JavaScript (here: the current time). "Uniform" = uniform across all
-// vertices. We keep it in an object so main.js can update `.value` each
-// frame and the shader sees the new number.
+// from JavaScript. "Uniform" = uniform across all vertices. We keep each one
+// in an object so main.js and the sliders can change `.value` and the shader
+// sees the new number on the next frame.
 // ---------------------------------------------------------------------------
 export const fishWaveUniforms = {
-  uTime: { value: 0 }, // seconds; main.js updates it every frame
+  // How far the tail tip swings sideways, in world units.
+  uAmplitude: { value: 0.35 },
+  // Distance along the body for one full S-curve. Fish are ~2.8 long, so 3.0
+  // means "about one S-curve along the whole body".
+  uWavelength: { value: 3.0 },
+  // How far through the wave cycle we are, in radians. Grows over time (main.js
+  // adds speed * deltaSeconds each frame). See the note below for why this is
+  // an accumulated "phase" and not a plain clock.
+  uPhase: { value: 0 },
 };
 
-// The wave settings. (Constants for now; step 2.6 turns them into sliders.)
-const WAVE_AMPLITUDE = 0.35; // how far the tail tip swings sideways (units)
-const WAVE_LENGTH = 3.0; // distance along the body for one full S-curve
-const WAVE_SPEED = 9.0; // radians per second (about 1.4 beats per second)
+// How fast the wave travels, in radians per second (9 rad/s = ~1.4 beats per
+// second). This one is NOT a uniform: it only changes how fast uPhase grows.
+//
+// Why not give the shader `time` and `speed` and compute time * speed there?
+// Because dragging the speed slider would then make time * speed JUMP, and the
+// body would visibly snap. Accumulating phase += speed * delta on the CPU
+// means a new speed only changes how fast the phase grows from now on - the
+// same trick as the tail-wag phase in step 2.2.
+export const fishWaveSettings = {
+  speed: 9.0,
+};
+
 const WAVE_HEAD_Z = 0.8; // from here forward the body stays perfectly still
 
 function addSwimWiggleToMaterial(material) {
   material.onBeforeCompile = (shader) => {
-    // Give the shader access to our uniform object.
-    shader.uniforms.uTime = fishWaveUniforms.uTime;
+    // Give the shader access to our uniform objects.
+    shader.uniforms.uAmplitude = fishWaveUniforms.uAmplitude;
+    shader.uniforms.uWavelength = fishWaveUniforms.uWavelength;
+    shader.uniforms.uPhase = fishWaveUniforms.uPhase;
 
-    // 1) Declare the uniform at the top of the vertex shader, so GLSL knows
-    //    `uTime` exists and is a single float number.
+    // 1) Declare the uniforms at the top of the vertex shader, so GLSL knows
+    //    they exist and are single float numbers.
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
       `#include <common>
-       uniform float uTime;`,
+       uniform float uAmplitude;
+       uniform float uWavelength;
+       uniform float uPhase;`,
     );
 
     // 2) Add the wiggle right after the vertex position is created.
@@ -245,30 +265,39 @@ function addSwimWiggleToMaterial(material) {
        // 'transformed' is this vertex's position in the fish's own local
        // space (x = sideways, y = up, z = along the body, nose at +Z).
 
-       // How much should THIS vertex wiggle? 0 for the head, 1 at the tail
-       // tip, growing in a straight line along the body. A real fish keeps
-       // its head fairly steady and swings its tail the most. Without this
-       // the whole fish would just slide side to side.
-       float tailWeight = clamp(
-         (${WAVE_HEAD_Z.toFixed(2)} - transformed.z) / (${WAVE_HEAD_Z.toFixed(2)} - (${TAIL_TIP_Z.toFixed(2)})),
-         0.0, 1.0);
+       // HOW MUCH should THIS vertex wiggle? 0 for the head, 1 at the tail
+       // tip. A real fish keeps its head fairly steady and swings its tail
+       // the most; without this weight the whole fish would just slide
+       // side to side like a snake with no head.
+       //
+       // smoothstep(edge0, edge1, x) returns 0 when x <= edge0, 1 when
+       // x >= edge1, and an S-shaped curve in between (flat at both ends).
+       // Our edges are (tail tip, head line). z is large at the nose, so
+       // smoothstep gives 1 at the head and 0 at the tail - we flip it with
+       // "1.0 - ..." to get 0 at the head and 1 at the tail.
+       // Compared with a straight ramp, the S-curve keeps the front half of
+       // the body calm and concentrates the motion in the tail, and it has
+       // no visible kink where the still part meets the moving part.
+       float tailWeight = 1.0 - smoothstep(${TAIL_TIP_Z.toFixed(2)}, ${WAVE_HEAD_Z.toFixed(2)}, transformed.z);
 
-       // A TRAVELLING SINE WAVE: sin(position * k + time * speed).
-       //  - z * k   : different parts of the body are at different points
-       //              of the wave, so the body bends into an S-shape.
-       //              k = 2*PI / wavelength (radians of wave per unit).
-       //  - time*speed: slides the whole pattern along as time passes, so
-       //              the S-shape travels instead of standing still.
-       // With '+ time' the crests move towards smaller z, i.e. from the nose
-       // towards the tail - the way a real swimming wave travels.
-       float wavePhase = transformed.z * ${(Math.PI * 2 / WAVE_LENGTH).toFixed(4)}
-                       + uTime * ${WAVE_SPEED.toFixed(2)};
+       // A TRAVELLING SINE WAVE: sin(position * k + phase).
+       //  - z * k : different parts of the body are at different points of
+       //            the wave, so the body bends into an S-shape.
+       //            k = 2*PI / wavelength (radians of wave per unit length).
+       //            Short wavelength = many tight ripples; long = one lazy bend.
+       //  - phase : grows with time, which slides the whole pattern along so
+       //            the S-shape travels instead of standing still.
+       // With '+ phase' the crests move towards smaller z, i.e. from the nose
+       // towards the tail - the way a real swimming wave travels. (The
+       // textbook form is z*k - t*w; our nose is +Z, so the sign flips.)
+       float waveNumber = 6.28318530718 / uWavelength;
+       float wavePhase = transformed.z * waveNumber + uPhase;
 
        // Push the vertex sideways (X) by the wave height, scaled by how much
        // this part of the body is allowed to move. NOTE: we only move the
        // positions, not the lighting normals, so shading is very slightly
        // off on the bent parts. Invisible at this size.
-       transformed.x += sin(wavePhase) * ${WAVE_AMPLITUDE.toFixed(3)} * tailWeight;`,
+       transformed.x += sin(wavePhase) * uAmplitude * tailWeight;`,
     );
   };
 }
