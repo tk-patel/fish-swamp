@@ -215,6 +215,46 @@ const desiredVelocity = new THREE.Vector3();
 const steeringForce = new THREE.Vector3();
 
 // ---------------------------------------------------------------------------
+// SMOOTH ORIENTATION (step 1.6)
+//
+// Why isn't lookAt enough? `fish.lookAt(x)` replaces the fish's rotation with
+// the one facing x, instantly. While the velocity changes slowly (like now)
+// that looks fine, but ANY sudden change in velocity (a collision, a flee
+// force, the keypress below) makes the nose snap. Fish bodies are heavy: we
+// want the body to ease towards the new heading instead.
+//
+// QUATERNIONS in plain terms: a rotation can be stored as three Euler angles
+// (x, y, z - "turn this much around X, then Y, then Z" - which is what
+// fish.rotation holds), or as a QUATERNION: four numbers that describe
+// "rotate by this angle around this axis" in one go. Euler angles are easy to
+// read but bad to blend: the order matters, and in some poses two of the
+// three axes line up ("gimbal lock") so you lose a way to rotate and the
+// interpolation takes weird detours. Quaternions have no such problem and
+// blend cleanly along the shortest path. That's why Three.js stores every
+// object's rotation as a quaternion internally (fish.quaternion), and
+// fish.rotation is just a friendlier view of it.
+// You never need to read the four numbers; you only combine and slerp them.
+// ---------------------------------------------------------------------------
+const turnRate = 5; // bigger = snappier turns. Try 1 (lazy) to 20 (almost instant).
+const worldUp = new THREE.Vector3(0, 1, 0);
+const lookMatrix = new THREE.Matrix4(); // scratch, reused every frame
+const targetQuaternion = new THREE.Quaternion(); // scratch, reused every frame
+
+// TEMPORARY keys for comparing the two versions side by side:
+//   L = toggle between abrupt lookAt and smooth slerp
+//   R = REVERSE the fish's velocity (a sudden 180-degree change of mind)
+let useSmoothTurning = true;
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'l' || event.key === 'L') {
+    useSmoothTurning = !useSmoothTurning;
+    console.log(useSmoothTurning ? 'turning: smooth (slerp)' : 'turning: abrupt (lookAt)');
+  }
+  if (event.key === 'r' || event.key === 'R') {
+    fishVelocity.negate(); // (x, y, z) -> (-x, -y, -z)
+  }
+});
+
+// ---------------------------------------------------------------------------
 // TEMPORARY REFERENCE OBJECTS (sense of depth) - remove once fish exist.
 // An empty blue-green void has no scale, so you can't tell how far anything
 // is. These give your eye something to measure against:
@@ -327,11 +367,45 @@ function animate() {
   fish.position.addScaledVector(fishVelocity, deltaSeconds);
 
   // POINT the fish along its velocity. Our convention is that the nose is
-  // local +Z (see fish.js), and Object3D.lookAt() turns an object so +Z
-  // faces a world-space point. The point one velocity-arrow ahead of the
-  // fish is exactly "where it is going": position + velocity.
+  // local +Z (see fish.js). The point one velocity-arrow ahead of the fish
+  // is exactly "where it is going": position + velocity.
   fishLookTarget.copy(fish.position).add(fishVelocity);
-  fish.lookAt(fishLookTarget);
+
+  if (useSmoothTurning) {
+    // SMOOTH version (step 1.6): work out the rotation we WANT, then move the
+    // fish's current rotation only PART of the way there each frame.
+    //
+    // a) Build the target rotation without touching the fish yet.
+    //    Matrix4.lookAt(eye, target, up) builds a rotation matrix (a 3x3
+    //    grid of numbers describing a rotation, here inside a 4x4 matrix)
+    //    whose Z axis points from `target` to `eye`. Object3D.lookAt uses it
+    //    with the two swapped, so we do the same: this makes the +Z axis
+    //    (the nose) point from the fish towards the look-ahead point.
+    //    `up` = (0, 1, 0) tells it which way is "up" so the fish keeps its
+    //    back on top and does not roll onto its side.
+    lookMatrix.lookAt(fishLookTarget, fish.position, worldUp);
+    //    Convert that matrix into a quaternion (see the QUATERNIONS notes
+    //    near the top of this block's setup, "SMOOTH ORIENTATION").
+    targetQuaternion.setFromRotationMatrix(lookMatrix);
+
+    // b) slerp = "spherical linear interpolation": the quaternion version of
+    //    lerp (linear interpolation, "a bit of the way from A to B").
+    //    slerp(target, t) moves the current rotation a fraction t of the way
+    //    to `target` along the shortest turn. t = 0 means don't move,
+    //    t = 1 means jump all the way (which is what plain lookAt does).
+    //
+    //    t must depend on delta time, or turning speed would depend on the
+    //    frame rate. 1 - exp(-rate * delta) is the standard fix: each
+    //    second the remaining angle shrinks by the same proportion, no
+    //    matter how many frames that second is cut into. (This exact trick
+    //    returns in step 5.5 for smoothing the moods.)
+    const turnBlend = 1 - Math.exp(-turnRate * deltaSeconds);
+    fish.quaternion.slerp(targetQuaternion, turnBlend);
+  } else {
+    // ABRUPT version (what we had in steps 1.4 and 1.5): jump straight to
+    // facing the look-ahead point. Press L in the browser to switch.
+    fish.lookAt(fishLookTarget);
+  }
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.

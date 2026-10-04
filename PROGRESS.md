@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 1.6 (next up)
-**Last updated:** 2026-10-04 (finished 1.5)
+**Current step:** 1.7 (next up)
+**Last updated:** 2026-10-04 (finished 1.6)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -20,7 +20,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 1.3 Forward direction convention
 - [x] 1.4 Move with a velocity vector
 - [x] 1.5 Steering toward a target
-- [ ] 1.6 Smooth orientation (quaternion slerp)
+- [x] 1.6 Smooth orientation (quaternion slerp)
 - [ ] 1.7 Wandering
 - [ ] 1.8 Stay inside the tank
 
@@ -91,6 +91,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 1.3 — documented the +Z forward convention at the top of fish.js; temporary AxesHelper on the fish and a temporary slow spin of the fish group (both in main.js) — commit 5bc9ba3 — Convention: +Z forward, +Y up, +X is the fish's left. Remove the temporary spin when step 1.4 gives the fish a velocity; the axes can stay until the owner is comfortable.
 - step 1.4 — `fishVelocity` Vector3 (1.5, 0.3, 2.0); each frame `position.addScaledVector(velocity, delta)` and `lookAt(position + velocity)`; temporary spin removed — commit e2ad2f0 — Fish leaves the view after a few seconds (expected). Reload the page to see it again. The AxesHelper is still on the fish.
 - step 1.5 — yellow target sphere on a radius-6 circle (with a gentle y bob); fish steers with steering = desired - velocity, clamped to maxSteeringForce (6), speed clamped to maxSpeed (4) — commit a0a93c9 — Camera moved to (0, 12, 18) so the whole circle is visible. Orientation is still a hard `lookAt` snap (fixed in 1.6).
+- step 1.6 — target quaternion from `Matrix4.lookAt` (world up kept), `fish.quaternion.slerp(target, 1 - exp(-turnRate * delta))`, turnRate 5; temporary keys L (toggle lookAt vs slerp) and R (reverse velocity) — commit: see `git log` ("step 1.6") — With the slowly changing velocity of the circle chase the two versions look similar; the difference shows when you press R. The key handler and the L/R keys are temporary.
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
