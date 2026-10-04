@@ -5,6 +5,7 @@ import * as THREE from 'three';
 // OrbitControls is an "addon": it ships inside the three package but is not
 // part of the core THREE object, so we import it from 'three/addons/...'.
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createFish } from './fish.js';
 
 // ---------------------------------------------------------------------------
 // 1. SCENE - the "stage". An empty container that holds everything we want
@@ -60,7 +61,12 @@ const camera = new THREE.PerspectiveCamera(
 // Our tank will be a box about 40 x 20 x 30 units centered on the origin, so
 // we back the camera up along +Z (towards us) and lift it a little (+Y)
 // to see all of it. OrbitControls (below) looks at the origin by default.
-camera.position.set(0, 5, 35);
+//
+// TEMPORARY (step 1.1): a fish is only ~2 units long, so from the full-tank
+// view at (0, 5, 35) it would be a speck. We stay close while we build one
+// fish, off to the side (x = 7) so we see its long side profile instead of
+// looking at its nose head-on. We go back to (0, 5, 35) at step 1.8 (the tank).
+camera.position.set(7, 2, 4);
 
 // ---------------------------------------------------------------------------
 // 3. RENDERER - the "photographer". It takes the scene + camera and paints
@@ -137,6 +143,13 @@ scene.add(hemisphereLight);
 const sunLight = new THREE.DirectionalLight(0xcfefff, 1.5);
 sunLight.position.set(10, 30, 10); // high above, slightly off-center
 scene.add(sunLight);
+
+// ---------------------------------------------------------------------------
+// THE FISH (step 1.1) - built in src/fish.js. We just add the returned Group
+// to the scene. It sits at the origin (0, 0, 0) by default.
+// ---------------------------------------------------------------------------
+const fish = createFish();
+scene.add(fish);
 
 // ---------------------------------------------------------------------------
 // TEMPORARY REFERENCE OBJECTS (sense of depth) - remove once fish exist.
