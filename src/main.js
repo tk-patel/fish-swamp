@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // OrbitControls is an "addon": it ships inside the three package but is not
 // part of the core THREE object, so we import it from 'three/addons/...'.
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createFish } from './fish.js';
+import { createFish, fishWaveUniforms } from './fish.js';
 
 // ---------------------------------------------------------------------------
 // 1. SCENE - the "stage". An empty container that holds everything we want
@@ -581,6 +581,10 @@ function animate() {
     // facing the look-ahead point. Press L in the browser to switch.
     fish.lookAt(fishLookTarget);
   }
+
+  // Tell the fish's vertex shader what time it is (seconds since start).
+  // The GPU does the actual wiggling; see addSwimWiggleToMaterial in fish.js.
+  fishWaveUniforms.uTime.value = timer.getElapsed();
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.

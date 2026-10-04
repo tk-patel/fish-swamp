@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 2.5 (next up)
-**Last updated:** 2026-10-04 (finished 2.4)
+**Current step:** 2.6 (next up)
+**Last updated:** 2026-10-04 (finished 2.5)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -29,7 +29,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 2.2 Wag speed tied to swim speed
 - [x] 2.3 Why not 300 multi-part fish (measure)
 - [x] 2.4 Single-mesh fish
-- [ ] 2.5 Vertex shader body wave
+- [x] 2.5 Vertex shader body wave
 - [ ] 2.6 Tune the wave with sliders
 
 ### Phase 3 — Instancing
@@ -98,6 +98,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 2.2 — wag frequency = base (0.8 Hz) + speed * 0.6; phase accumulated each frame (no jumps when frequency changes); read-only speed/frequency in the GUI; temporary Arrow Up/Down keys change maxSpeed (1..6). Measured: speed 0.9 -> 1.35 Hz, 2.7 -> 2.4 Hz, 5.7 -> 4.2 Hz — commit: dba9208
 - step 2.3 — bottom-left readout (FPS, draw calls, triangles); temporary ?stress=N URL parameter spawns N extra multi-part fish with their own tail wags. Measured on the owner's machine setup used for testing (120 Hz display): 1 fish = 9 calls / 120 FPS; 200 extra = ~790 calls / 120 FPS; 1000 extra = ~3930 calls / 58 FPS. Default page keeps only one fish. The ?stress code stays until step 3.1 so we can compare single-mesh (2.4) and instanced (3.1) numbers — commit: 22decd7
 - step 2.4 — createFish() now returns ONE Mesh built from a custom BufferGeometry (40 rings x 16 sides, egg body -> thin stalk -> flat fin, vertex colors, shared geometry+material). Eyes dropped. The CPU tail wag (2.1/2.2), its lil-gui panel and the arrow keys were removed (no tail pivot any more; lil-gui stays installed for 2.6). ?stress=1000: 3933 calls / 58 FPS (4-mesh fish) -> ~997 calls / 120 FPS (single mesh). The fish does not wiggle again until 2.5 — commit: d0597b2
+- step 2.5 — onBeforeCompile injects GLSL after <begin_vertex> in MeshStandardMaterial: transformed.x += sin(z * k + uTime * speed) * amplitude * tailWeight (linear ramp, head still at z>=0.8, full at tail tip); uTime uniform updated in animate(); constants amplitude 0.35, wavelength 3.0, speed 9 rad/s — sign is + (not - as written generically in PLAN) because our nose is +Z and the wave must travel head -> tail; all fish share one uniform so they wiggle in lockstep until 3.4 — commit: HASH_PLACEHOLDER
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)

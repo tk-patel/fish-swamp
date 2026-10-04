@@ -183,6 +183,96 @@ function createFishGeometry() {
   return geometry;
 }
 
+// ---------------------------------------------------------------------------
+// STEP 2.5: THE SWIM WIGGLE, DONE ON THE GPU WITH A VERTEX SHADER
+//
+// WHAT IS A SHADER?  A tiny program that runs on the graphics card (GPU),
+// written in a C-like language called GLSL. For every frame, the GPU runs:
+//   - a VERTEX SHADER once for every vertex (corner point) of the mesh: it
+//     decides where on the screen that corner goes. We can nudge vertices
+//     here, which MOVES THE SHAPE.
+//   - a FRAGMENT SHADER once for every pixel covered by a triangle: it
+//     decides that pixel's color (lighting, fog, ...). We leave this alone.
+// The GPU runs thousands of these in parallel, which is why it can wiggle
+// 300 fish for almost free - the CPU never touches their vertices.
+//
+// WHY NOT JUST MOVE VERTICES IN JAVASCRIPT?  We would loop over 641 vertices
+// x 300 fish x 60 times a second and re-upload the data to the GPU. Wasteful.
+//
+// HOW DO WE ADD OUR OWN CODE?  MeshStandardMaterial already contains a big,
+// complicated shader (physically based lighting, fog, ...). Rewriting it
+// would be painful, so Three.js lets us EDIT it as text just before it is
+// compiled: `material.onBeforeCompile = (shader) => { ... }`. The shader is
+// built from named snippets like `#include <begin_vertex>` (the line that
+// creates the vertex position variable `transformed`). We find that line and
+// put our own code right after it.
+//
+// UNIFORMS: a value that is the SAME for every vertex in a draw call, set
+// from JavaScript (here: the current time). "Uniform" = uniform across all
+// vertices. We keep it in an object so main.js can update `.value` each
+// frame and the shader sees the new number.
+// ---------------------------------------------------------------------------
+export const fishWaveUniforms = {
+  uTime: { value: 0 }, // seconds; main.js updates it every frame
+};
+
+// The wave settings. (Constants for now; step 2.6 turns them into sliders.)
+const WAVE_AMPLITUDE = 0.35; // how far the tail tip swings sideways (units)
+const WAVE_LENGTH = 3.0; // distance along the body for one full S-curve
+const WAVE_SPEED = 9.0; // radians per second (about 1.4 beats per second)
+const WAVE_HEAD_Z = 0.8; // from here forward the body stays perfectly still
+
+function addSwimWiggleToMaterial(material) {
+  material.onBeforeCompile = (shader) => {
+    // Give the shader access to our uniform object.
+    shader.uniforms.uTime = fishWaveUniforms.uTime;
+
+    // 1) Declare the uniform at the top of the vertex shader, so GLSL knows
+    //    `uTime` exists and is a single float number.
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+       uniform float uTime;`,
+    );
+
+    // 2) Add the wiggle right after the vertex position is created.
+    //    (The ${...} parts below are filled in by JavaScript before the
+    //    text is sent to the GPU, turning our constants into GLSL numbers.)
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+
+       // 'transformed' is this vertex's position in the fish's own local
+       // space (x = sideways, y = up, z = along the body, nose at +Z).
+
+       // How much should THIS vertex wiggle? 0 for the head, 1 at the tail
+       // tip, growing in a straight line along the body. A real fish keeps
+       // its head fairly steady and swings its tail the most. Without this
+       // the whole fish would just slide side to side.
+       float tailWeight = clamp(
+         (${WAVE_HEAD_Z.toFixed(2)} - transformed.z) / (${WAVE_HEAD_Z.toFixed(2)} - (${TAIL_TIP_Z.toFixed(2)})),
+         0.0, 1.0);
+
+       // A TRAVELLING SINE WAVE: sin(position * k + time * speed).
+       //  - z * k   : different parts of the body are at different points
+       //              of the wave, so the body bends into an S-shape.
+       //              k = 2*PI / wavelength (radians of wave per unit).
+       //  - time*speed: slides the whole pattern along as time passes, so
+       //              the S-shape travels instead of standing still.
+       // With '+ time' the crests move towards smaller z, i.e. from the nose
+       // towards the tail - the way a real swimming wave travels.
+       float wavePhase = transformed.z * ${(Math.PI * 2 / WAVE_LENGTH).toFixed(4)}
+                       + uTime * ${WAVE_SPEED.toFixed(2)};
+
+       // Push the vertex sideways (X) by the wave height, scaled by how much
+       // this part of the body is allowed to move. NOTE: we only move the
+       // positions, not the lighting normals, so shading is very slightly
+       // off on the bent parts. Invisible at this size.
+       transformed.x += sin(wavePhase) * ${WAVE_AMPLITUDE.toFixed(3)} * tailWeight;`,
+    );
+  };
+}
+
 // Build the geometry and material ONCE and share them between every fish.
 // Many meshes can point at the same geometry/material, so 1000 fish do not
 // need 1000 copies of the same 640 vertices. (Instancing in phase 3 takes
@@ -200,6 +290,7 @@ export function createFish() {
     // vertexColors: true tells the material to use the 'color' attribute we
     // painted above instead of one flat color for the whole mesh.
     sharedFishMaterial = new THREE.MeshStandardMaterial({ vertexColors: true });
+    addSwimWiggleToMaterial(sharedFishMaterial);
   }
   return new THREE.Mesh(sharedFishGeometry, sharedFishMaterial);
 }
