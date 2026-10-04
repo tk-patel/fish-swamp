@@ -451,6 +451,56 @@ scene.add(referenceFloor);
 // obstacles the fish swims through.)
 
 // ---------------------------------------------------------------------------
+// PERFORMANCE READOUT (step 2.3) - a small text box in the bottom-left corner.
+//   FPS        = frames per second actually achieved (60 is the goal).
+//   draw calls = how many times per frame the CPU tells the GPU "draw this
+//                mesh". renderer.info.render.calls counts them for us.
+//   triangles  = how many triangles the GPU had to draw per frame.
+//
+// WHY DRAW CALLS MATTER: each separate Mesh costs one draw call, and each
+// draw call has a fixed CPU cost (the browser must validate state, send
+// commands to the graphics driver, ...). The GPU itself can draw millions of
+// triangles easily, but the CPU can only SEND maybe a few thousand draw calls
+// per frame before the frame rate drops. So "many small meshes" is slow
+// even if every mesh is tiny.
+// ---------------------------------------------------------------------------
+const statsBox = document.createElement('div');
+statsBox.style.cssText =
+  'position:fixed;left:8px;bottom:8px;padding:6px 8px;background:rgba(0,0,0,0.55);' +
+  'color:#cfefff;font:12px/1.4 monospace;pointer-events:none;white-space:pre;';
+document.body.appendChild(statsBox);
+
+let framesSinceStatsUpdate = 0;
+let secondsSinceStatsUpdate = 0;
+
+// ---------------------------------------------------------------------------
+// STRESS TEST (step 2.3) - TEMPORARY. Open the page as
+//   http://localhost:5173/?stress=200
+// to add 200 EXTRA multi-part fish (body + tail + 2 eyes each, each with its
+// own tail wag) and watch the numbers above. Without the "?stress=" part
+// you get just the one swimming fish. These extra fish do not swim around;
+// they just hover and wag, which is enough to show the cost of rendering them.
+// ---------------------------------------------------------------------------
+const stressFishCount = Number(new URLSearchParams(window.location.search).get('stress')) || 0;
+const stressFish = [];
+for (let i = 0; i < stressFishCount; i++) {
+  const extraFish = createFish();
+  // Random spot inside the tank: Math.random() is 0..1, so (r - 0.5) is
+  // -0.5..0.5, and times the tank size gives a random point in the box.
+  extraFish.position.set(
+    (Math.random() - 0.5) * tankSize.x,
+    (Math.random() - 0.5) * tankSize.y,
+    (Math.random() - 0.5) * tankSize.z,
+  );
+  extraFish.rotation.y = Math.random() * Math.PI * 2; // random heading
+  scene.add(extraFish);
+  stressFish.push({
+    tailPivot: extraFish.getObjectByName('tailPivot'),
+    phase: Math.random() * Math.PI * 2, // so they do not all wag in step
+  });
+}
+
+// ---------------------------------------------------------------------------
 // TIMER - measures real time between frames.
 // (The plan says THREE.Clock, but Clock is deprecated in the Three.js version
 // we installed. THREE.Timer is its replacement and works the same way for us:
@@ -626,12 +676,32 @@ function animate() {
   swimStats.swimSpeed = Number(currentSpeed.toFixed(2));
   swimStats.wagFrequency = Number(wagFrequency.toFixed(2));
 
+  // Wag every extra stress-test fish too (does nothing when there are none).
+  const stressWagAngle = tailWagPhase; // reuse the main fish's phase as the base
+  for (const extra of stressFish) {
+    extra.tailPivot.rotation.y = Math.sin(stressWagAngle + extra.phase) * tailWag.amplitude;
+  }
+
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.
   controls.update();
 
   // Take the picture: draw `scene` as seen by `camera`.
   renderer.render(scene, camera);
+
+  // Update the readout twice a second (updating text every frame would
+  // itself cost time and be unreadable). FPS = frames / seconds elapsed.
+  framesSinceStatsUpdate += 1;
+  secondsSinceStatsUpdate += deltaSeconds;
+  if (secondsSinceStatsUpdate >= 0.5) {
+    const fps = framesSinceStatsUpdate / secondsSinceStatsUpdate;
+    statsBox.textContent =
+      `FPS:        ${fps.toFixed(0)}\n` +
+      `draw calls: ${renderer.info.render.calls}\n` +
+      `triangles:  ${renderer.info.render.triangles}`;
+    framesSinceStatsUpdate = 0;
+    secondsSinceStatsUpdate = 0;
+  }
 }
 
 animate();

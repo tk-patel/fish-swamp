@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 2.3 (next up)
-**Last updated:** 2026-10-04 (finished 2.2)
+**Current step:** 2.4 (next up)
+**Last updated:** 2026-10-04 (finished 2.3)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -27,7 +27,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 ### Phase 2 — Swim animation
 - [x] 2.1 Tail wag with sine
 - [x] 2.2 Wag speed tied to swim speed
-- [ ] 2.3 Why not 300 multi-part fish (measure)
+- [x] 2.3 Why not 300 multi-part fish (measure)
 - [ ] 2.4 Single-mesh fish
 - [ ] 2.5 Vertex shader body wave
 - [ ] 2.6 Tune the wave with sliders
@@ -96,6 +96,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 1.8 — 40 x 20 x 30 wireframe tank; soft boundary force per axis (linear ramp over a 5-unit margin, weight 30, added to the steering sum before the clamp); camera back to (0, 5, 35); reference spheres removed (grid floor stays) — commit 16be77a — Tested in the browser: 45 s of wandering plus a teleport to near a corner; the fish never passed 90% of the half-size on any axis.
 - step 2.1 — installed lil-gui; tail pivot rotated with sin(elapsed * frequency * 2PI) * amplitude; sliders for frequency (2 Hz) and amplitude (0.5 rad) — commit: e4db00a
 - step 2.2 — wag frequency = base (0.8 Hz) + speed * 0.6; phase accumulated each frame (no jumps when frequency changes); read-only speed/frequency in the GUI; temporary Arrow Up/Down keys change maxSpeed (1..6). Measured: speed 0.9 -> 1.35 Hz, 2.7 -> 2.4 Hz, 5.7 -> 4.2 Hz — commit: dba9208
+- step 2.3 — bottom-left readout (FPS, draw calls, triangles); temporary ?stress=N URL parameter spawns N extra multi-part fish with their own tail wags. Measured on the owner's machine setup used for testing (120 Hz display): 1 fish = 9 calls / 120 FPS; 200 extra = ~790 calls / 120 FPS; 1000 extra = ~3930 calls / 58 FPS. Default page keeps only one fish. The ?stress code stays until step 3.1 so we can compare single-mesh (2.4) and instanced (3.1) numbers — commit: HASH_PLACEHOLDER
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
