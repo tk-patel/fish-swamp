@@ -65,8 +65,9 @@ const camera = new THREE.PerspectiveCamera(
 // TEMPORARY (step 1.1): a fish is only ~2 units long, so from the full-tank
 // view at (0, 5, 35) it would be a speck. We stay closer while we build one
 // fish. (Step 1.5: moved back and up a little to see more of the area.)
-// We go back to (0, 5, 35) at step 1.8.
-camera.position.set(0, 12, 18);
+// Step 1.8: back to the full-tank view (0, 5, 35) so the whole 40 x 20 x 30
+// tank fits on screen. The fish is small from here; scroll to zoom in.
+camera.position.set(0, 5, 35);
 
 // ---------------------------------------------------------------------------
 // 3. RENDERER - the "photographer". It takes the scene + camera and paints
@@ -150,7 +151,6 @@ scene.add(sunLight);
 // ---------------------------------------------------------------------------
 const fish = createFish();
 scene.add(fish);
-
 // TEMPORARY (step 1.3): AxesHelper draws three colored lines from the
 // object's origin along its local axes, so you can SEE the directions:
 //   RED   = local +X     GREEN = local +Y     BLUE = local +Z
@@ -200,6 +200,68 @@ const maxSteeringForce = 5;
 // Scratch vectors, reused every frame (same reason as fishLookTarget).
 const desiredVelocity = new THREE.Vector3();
 const steeringForce = new THREE.Vector3();
+
+// ---------------------------------------------------------------------------
+// THE TANK (step 1.8) - the box the fish must stay inside.
+// 40 wide (X) x 20 tall (Y) x 30 deep (Z), centered on the origin, so the
+// walls are at x = +-20, y = +-10, z = +-15. The camera also goes back to
+// the full-tank view (set where the camera is created).
+//
+// Two ways to keep fish inside:
+//   HARD CLAMP: if position is outside, force it back to the wall.
+//     Simple and a guaranteed rule, but the fish slams into an invisible wall
+//     and gets stuck sliding along it, and the heading snaps. Looks fake.
+//   SOFT BOUNDARY (what we use): near a wall, add a steering force pointing
+//     inward that gets STRONGER the closer the fish is. The fish sees the wall
+//     coming and curves away early, like a real fish. It is just one more
+//     steering arrow, added to the same sum as wander.
+// ---------------------------------------------------------------------------
+const tankSize = new THREE.Vector3(40, 20, 30);
+const tankHalfSize = tankSize.clone().multiplyScalar(0.5); // (20, 10, 15)
+
+// TEMPORARY wireframe so we can see the tank. BoxGeometry has two triangles
+// per face; EdgesGeometry keeps only the real box edges (12 lines) so we do
+// not see the diagonal lines through each face. LineSegments draws them.
+const tankWireframe = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(tankSize.x, tankSize.y, tankSize.z)),
+  new THREE.LineBasicMaterial({ color: 0x7fe0ff }),
+);
+scene.add(tankWireframe);
+
+// How close to a wall before the fish starts to feel it (units). Further than
+// this from every wall = no boundary force at all.
+const boundaryMargin = 5;
+
+// How strongly the boundary pushes, compared to the fish's own wishes.
+// It is much bigger than maxSteeringForce (5) on purpose: right next to the
+// wall the boundary must WIN against the wander/seek pull, which can be up
+// to about 6. The final total is still clamped to maxSteeringForce, so the
+// fish turns at its normal rate; this number only decides who gets priority.
+const boundaryWeight = 30;
+
+const boundaryForce = new THREE.Vector3(); // scratch, reused every frame
+
+// For ONE axis: how hard should the fish be pushed back from the walls?
+//   coordinate: the fish's position on this axis (e.g. its x)
+//   halfExtent: distance from the center to the wall on this axis (e.g. 20)
+// Returns a number from -1 to +1:
+//   0   = far from both walls (no push)
+//   -1  = touching the + wall (push fully towards -)
+//   +1  = touching the - wall (push fully towards +)
+function getAxisBoundaryPush(coordinate, halfExtent) {
+  // How far past the start of the "danger zone" is the fish? The zone begins
+  // `boundaryMargin` units before the wall.
+  const distanceIntoZone = Math.abs(coordinate) - (halfExtent - boundaryMargin);
+  if (distanceIntoZone <= 0) {
+    return 0; // still in the safe middle: no push
+  }
+  // 0 at the edge of the zone, 1 at the wall, and beyond the wall we keep
+  // it at 1 (Math.min), so a fish that overshoots is still pushed hard.
+  const strength = Math.min(distanceIntoZone / boundaryMargin, 1);
+  // Push TOWARDS the center: opposite to the side the fish is on.
+  // Math.sign gives +1 for positive numbers and -1 for negative ones.
+  return -Math.sign(coordinate) * strength;
+}
 
 // ---------------------------------------------------------------------------
 // WANDER (step 1.7) - swimming around "on its own", with no target.
@@ -295,30 +357,21 @@ window.addEventListener('keydown', (event) => {
 });
 
 // ---------------------------------------------------------------------------
-// TEMPORARY REFERENCE OBJECTS (sense of depth) - remove once fish exist.
+// TEMPORARY REFERENCE FLOOR (sense of depth).
 // An empty blue-green void has no scale, so you can't tell how far anything
-// is. These give your eye something to measure against:
-//   - GridHelper: a flat grid of lines acting as the tank floor. The tank is
-//     20 tall and centered on y = 0, so its floor is at y = -10.
-//     Args: total size (120), number of divisions (60 -> 2-unit squares),
-//     color of the center lines, color of the other lines.
-//   - A few spheres at increasing distance, so you can watch the nearer ones
-//     look crisp and lit while the far ones melt into the fog.
+// is. GridHelper gives your eye something to measure against: a flat grid of
+// lines acting as the tank floor. The tank is 20 tall and centered on y = 0,
+// so its floor is at y = -10.
+//   Args: total size (120), number of divisions (60 -> 2-unit squares),
+//   color of the center lines, color of the other lines.
 // ---------------------------------------------------------------------------
 const referenceFloor = new THREE.GridHelper(120, 60, 0x4fb8c8, 0x1d7a8a);
 referenceFloor.position.y = -10;
 scene.add(referenceFloor);
 
-const referenceSphereGeometry = new THREE.SphereGeometry(1.5, 24, 16);
-const referenceSphereMaterial = new THREE.MeshStandardMaterial({ color: 0xffa94d });
-const referenceSphereZPositions = [15, 0, -15, -30, -45];
-referenceSphereZPositions.forEach((z, index) => {
-  const sphere = new THREE.Mesh(referenceSphereGeometry, referenceSphereMaterial);
-  // Alternate left/right so they don't hide behind each other.
-  const x = index % 2 === 0 ? -5 : 5;
-  sphere.position.set(x, -4, z);
-  scene.add(sphere);
-});
+// (Step 1.8: the reference spheres were removed - there is a fish and a tank
+// to look at now, and spheres floating inside the tank would look like
+// obstacles the fish swims through.)
 
 // ---------------------------------------------------------------------------
 // TIMER - measures real time between frames.
@@ -408,6 +461,18 @@ function animate() {
   //    If I'm swimming away from the target, it is big and points sideways
   //    or backwards, pulling the fish around in a curve.
   steeringForce.subVectors(desiredVelocity, fishVelocity);
+
+  // 2b. STAY IN THE TANK (step 1.8): add the boundary push to the same sum.
+  //     Steering forces are just arrows, so combining behaviors = adding
+  //     arrows (the flock will add separation, alignment, ... the same way).
+  //     Each axis is independent, so near a corner two or three axes push at
+  //     once and the fish is nudged away from all the nearby walls.
+  boundaryForce.set(
+    getAxisBoundaryPush(fish.position.x, tankHalfSize.x),
+    getAxisBoundaryPush(fish.position.y, tankHalfSize.y),
+    getAxisBoundaryPush(fish.position.z, tankHalfSize.z),
+  );
+  steeringForce.addScaledVector(boundaryForce, boundaryWeight);
 
   // 3. LIMIT the steering to maxSteeringForce. Without this the fish would
   //    apply the whole correction at once and snap to the desired velocity,

@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 1.8 (next up)
-**Last updated:** 2026-10-04 (finished 1.7)
+**Current step:** 2.1 (next up) — Phase 1 complete
+**Last updated:** 2026-10-04 (finished 1.8)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -22,7 +22,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 1.5 Steering toward a target
 - [x] 1.6 Smooth orientation (quaternion slerp)
 - [x] 1.7 Wandering
-- [ ] 1.8 Stay inside the tank
+- [x] 1.8 Stay inside the tank
 
 ### Phase 2 — Swim animation
 - [ ] 2.1 Tail wag with sine
@@ -93,6 +93,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 1.5 — yellow target sphere on a radius-6 circle (with a gentle y bob); fish steers with steering = desired - velocity, clamped to maxSteeringForce (6), speed clamped to maxSpeed (4) — commit a0a93c9 — Camera moved to (0, 12, 18) so the whole circle is visible. Orientation is still a hard `lookAt` snap (fixed in 1.6).
 - step 1.6 — target quaternion from `Matrix4.lookAt` (world up kept), `fish.quaternion.slerp(target, 1 - exp(-turnRate * delta))`, turnRate 5; temporary keys L (toggle lookAt vs slerp) and R (reverse velocity) — commit ab6bf0f — With the slowly changing velocity of the circle chase the two versions look similar; the difference shows when you press R. The key handler and the L/R keys are temporary.
 - step 1.7 — removed the chase target; wander = random-nudged point on a sphere (r 2) placed 4 units ahead of the fish, sought with the same steering; maxSpeed 3, maxSteeringForce 5 — commit 53da745 — Added temporary debug visuals (blue wireframe wander sphere + red wander point) beyond the plan; delete later. The fish now drifts out of view after ~10 s (expected until 1.8 adds the tank bounds); reload to restart.
+- step 1.8 — 40 x 20 x 30 wireframe tank; soft boundary force per axis (linear ramp over a 5-unit margin, weight 30, added to the steering sum before the clamp); camera back to (0, 5, 35); reference spheres removed (grid floor stays) — commit: see `git log` ("step 1.8") — Tested in the browser: 45 s of wandering plus a teleport to near a corner; the fish never passed 90% of the half-size on any axis.
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
