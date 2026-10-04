@@ -151,6 +151,16 @@ scene.add(sunLight);
 const fish = createFish();
 scene.add(fish);
 
+// TEMPORARY (step 1.3): AxesHelper draws three colored lines from the
+// object's origin along its local axes, so you can SEE the directions:
+//   RED   = local +X     GREEN = local +Y     BLUE = local +Z
+// (Memory trick: R-G-B = X-Y-Z.) The argument is the length of each line.
+// We add it to the FISH (not the scene) so it is a child of the fish and
+// turns together with it, which shows the fish's LOCAL axes, not the world's.
+// Our convention (see fish.js): the nose points along the BLUE line.
+const fishAxes = new THREE.AxesHelper(2.5);
+fish.add(fishAxes);
+
 // ---------------------------------------------------------------------------
 // TEMPORARY REFERENCE OBJECTS (sense of depth) - remove once fish exist.
 // An empty blue-green void has no scale, so you can't tell how far anything
@@ -205,10 +215,15 @@ function animate() {
   // DELTA TIME = seconds since the previous frame.
   //   60 Hz screen  -> about 0.0167 s (1/60)
   //   144 Hz screen -> about 0.0069 s (1/144)
-  // Nothing in the scene moves by itself yet, so we don't use this value
-  // right now. Fish will use it from step 1.4 on, always as
-  // `movement = speed (units per second) * deltaSeconds` (see step 0.3).
+  // Always move things as `speed (units per second) * deltaSeconds`
+  // (see step 0.3).
   const deltaSeconds = timer.getDelta();
+
+  // TEMPORARY (step 1.3): turn the fish around its local Y (up) axis, 0.8
+  // radians per second, to watch the axes and the nose rotate with it.
+  // The blue line (+Z) and the nose should always stay together.
+  // Delta time again: speed per second * seconds since last frame.
+  fish.rotation.y += 0.8 * deltaSeconds;
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.

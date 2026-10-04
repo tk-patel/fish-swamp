@@ -3,6 +3,30 @@
 // UNITS: 1 world unit is about half a fish body length, so our fish is
 // roughly 2 units long. (The tank is 40 x 20 x 30 units, so that is a
 // believable size for a fish in it.)
+//
+// ===========================================================================
+// FORWARD DIRECTION CONVENTION  (decided in step 1.3 - never change this!)
+//
+//   In the fish's LOCAL space:
+//     +Z = FORWARD (the nose points this way, the tail trails towards -Z)
+//     +Y = UP      (the back of the fish; the belly is -Y)
+//     +X = the fish's LEFT side (-X is its right side)
+//
+//   Why is +X the fish's left? Standing at +Z and looking at the origin,
+//   +X is on YOUR right. A fish facing +Z is facing TOWARDS you, so its
+//   left is on your right. (Face a friend: your right hand is on their
+//   left.) The fish is symmetric, so this rarely matters, but it explains
+//   what you will see in the axes helper.
+//
+//   Why +Z? Because Object3D.lookAt(target) rotates an object so that its
+//   local +Z axis points at the target (for non-camera objects). With +Z as
+//   the nose, `fish.lookAt(somewhere)` makes the fish face `somewhere`
+//   with no extra rotation maths. Velocity-based steering (steps 1.4-1.6)
+//   and the instanced flock (phase 3) all depend on this one decision.
+//
+//   The geometry below already follows it: the eyes are at z = +0.6 (near
+//   the nose) and the tail joint is at z = -0.9 (the back end).
+// ===========================================================================
 
 import * as THREE from 'three';
 
