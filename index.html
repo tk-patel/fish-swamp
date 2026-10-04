@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fish Swamp</title>
+    <style>
+      /* Remove the default browser margin and make the page fill the window,
+         so the 3D canvas we add later can cover the whole screen. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #06202b;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Later steps will put the Three.js <canvas> in here. -->
+    <div id="app"></div>
+
+    <!-- type="module" lets us use import/export. Vite serves and bundles it. -->
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

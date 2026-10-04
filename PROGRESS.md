@@ -1,14 +1,14 @@
 # PROGRESS.md
 
-**Current step:** 0.1
-**Last updated:** (agent fills in)
+**Current step:** 0.2 (next up)
+**Last updated:** 2026-10-04 (finished 0.1)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
 ## Checklist
 
 ### Phase 0 — Setup and 3D basics
-- [ ] 0.1 Project skeleton
+- [x] 0.1 Project skeleton
 - [ ] 0.2 Scene, camera, renderer, spinning cube
 - [ ] 0.3 Delta time
 - [ ] 0.4 Resize and OrbitControls
@@ -80,6 +80,8 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 
 ## Log
 (One entry per finished step: `step X.Y — what changed — commit hash — anything surprising`)
+
+- step 0.1 — Vite + three installed, blank page, `src/main.js` logs hello — commit: see `git log` ("step 0.1") — Wrote the Vite files by hand instead of `npm create vite` to avoid template extras (counter demo, etc.).
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
