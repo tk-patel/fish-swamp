@@ -6,6 +6,9 @@ import * as THREE from 'three';
 // part of the core THREE object, so we import it from 'three/addons/...'.
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createFish } from './fish.js';
+// lil-gui draws a small control panel (sliders, checkboxes) in the corner of
+// the page. We use it to tweak numbers live instead of edit-save-reload.
+import GUI from 'lil-gui';
 
 // ---------------------------------------------------------------------------
 // 1. SCENE - the "stage". An empty container that holds everything we want
@@ -160,6 +163,40 @@ scene.add(fish);
 // Our convention (see fish.js): the nose points along the BLUE line.
 const fishAxes = new THREE.AxesHelper(2.5);
 fish.add(fishAxes);
+
+// ---------------------------------------------------------------------------
+// TAIL WAG (step 2.1) - the easy way: rotate the tail pivot with a sine wave.
+//
+// SINE WAVE: Math.sin(x) smoothly swings between -1 and +1 and repeats every
+// 2 * PI (about 6.28) of x. Think of a pendulum: it slows at the ends of the
+// swing and is fastest in the middle, exactly how a tail should move.
+//
+//   angle = Math.sin(time * frequency * 2 * PI + phase) * amplitude
+//
+//   amplitude - how FAR it swings (the biggest angle, here in radians).
+//               sin gives -1..+1, multiplying scales that to -amp..+amp.
+//   frequency - how OFTEN it swings: complete left-right-left cycles per
+//               second (Hz). Multiplying by 2 * PI converts "cycles" to the
+//               "radians" that sin expects (one cycle = 2 * PI radians).
+//   phase     - where in the cycle it STARTS (an offset). Two tails with
+//               different phases wag out of step. Zero for now; it becomes
+//               important when there are 300 fish.
+//
+// We found the tail pivot in step 1.2 (it was named 'tailPivot'). Rotating
+// its Y axis swings the tail left/right around the joint with the body.
+// ---------------------------------------------------------------------------
+const tailPivot = fish.getObjectByName('tailPivot');
+const tailWag = {
+  frequency: 2, // cycles per second
+  amplitude: 0.5, // radians (about 29 degrees each side)
+};
+
+// lil-gui: `gui.add(object, 'property', min, max)` makes a slider that edits
+// object.property live.
+const gui = new GUI();
+const tailFolder = gui.addFolder('Tail wag');
+tailFolder.add(tailWag, 'frequency', 0, 10, 0.1).name('speed (cycles/sec)');
+tailFolder.add(tailWag, 'amplitude', 0, 1.2, 0.01).name('amplitude (radians)');
 
 // ---------------------------------------------------------------------------
 // FISH VELOCITY (step 1.4)
@@ -535,6 +572,11 @@ function animate() {
     // facing the look-ahead point. Press L in the browser to switch.
     fish.lookAt(fishLookTarget);
   }
+
+  // WAG the tail: a sine of elapsed time, scaled by the amplitude.
+  const elapsedSeconds = timer.getElapsed();
+  tailPivot.rotation.y =
+    Math.sin(elapsedSeconds * tailWag.frequency * 2 * Math.PI) * tailWag.amplitude;
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.
