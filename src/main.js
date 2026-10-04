@@ -186,17 +186,46 @@ fish.add(fishAxes);
 // its Y axis swings the tail left/right around the joint with the body.
 // ---------------------------------------------------------------------------
 const tailPivot = fish.getObjectByName('tailPivot');
+//
+// STEP 2.2 - tie the wag to the swim speed. A fish that swims faster beats
+// its tail faster, so the frequency is no longer a fixed number but a
+// function of how fast the fish is actually moving:
+//
+//   frequency = baseFrequency + speed * frequencyPerSpeed
+//
+// This is a MAPPING: turning one quantity (speed, units/s) into another
+// (wag rate, cycles/s) with a straight line. `baseFrequency` is the wag of a
+// fish that is barely moving; `frequencyPerSpeed` is the slope of the line
+// (extra Hz for each extra unit/second of speed). Animation that responds
+// to motion looks alive; animation on its own clock looks like a toy.
 const tailWag = {
-  frequency: 2, // cycles per second
+  baseFrequency: 0.8, // cycles per second when the fish is (almost) still
+  frequencyPerSpeed: 0.6, // extra cycles per second for each unit/s of speed
   amplitude: 0.5, // radians (about 29 degrees each side)
 };
+
+// The wag PHASE: how far through its swing cycle the tail is, in radians.
+// Why keep a running total instead of Math.sin(elapsed * frequency)?
+// If the frequency changes while the fish speeds up, `elapsed * frequency`
+// JUMPS: at 60 s, a change from 2 Hz to 3 Hz moves the argument by 60 whole
+// cycles in one frame, so the tail would teleport (a glitch). Instead we add
+// a tiny step each frame: phase += (radians per second) * deltaSeconds.
+// Changing the frequency now only changes how FAST the phase grows from
+// here on, with no jump.
+let tailWagPhase = 0;
 
 // lil-gui: `gui.add(object, 'property', min, max)` makes a slider that edits
 // object.property live.
 const gui = new GUI();
 const tailFolder = gui.addFolder('Tail wag');
-tailFolder.add(tailWag, 'frequency', 0, 10, 0.1).name('speed (cycles/sec)');
+tailFolder.add(tailWag, 'baseFrequency', 0, 5, 0.1).name('base speed (Hz)');
+tailFolder.add(tailWag, 'frequencyPerSpeed', 0, 2, 0.05).name('extra Hz per speed');
 tailFolder.add(tailWag, 'amplitude', 0, 1.2, 0.01).name('amplitude (radians)');
+
+// Read-only numbers shown in the panel, updated every frame (see animate()).
+const swimStats = { swimSpeed: 0, wagFrequency: 0 };
+tailFolder.add(swimStats, 'swimSpeed').name('swim speed').listen().disable();
+tailFolder.add(swimStats, 'wagFrequency').name('wag now (Hz)').listen().disable();
 
 // ---------------------------------------------------------------------------
 // FISH VELOCITY (step 1.4)
@@ -231,7 +260,7 @@ const fishLookTarget = new THREE.Vector3();
 //                      Small = lazy, wide turns (a big whale).
 //                      Large = sharp, twitchy turns (a minnow).
 // ---------------------------------------------------------------------------
-const maxSpeed = 3;
+let maxSpeed = 3; // `let`, not `const`: the temporary keys below change it
 const maxSteeringForce = 5;
 
 // Scratch vectors, reused every frame (same reason as fishLookTarget).
@@ -390,6 +419,17 @@ window.addEventListener('keydown', (event) => {
   }
   if (event.key === 'r' || event.key === 'R') {
     fishVelocity.negate(); // (x, y, z) -> (-x, -y, -z)
+  }
+  // TEMPORARY (step 2.2): Arrow Up / Arrow Down = faster / slower fish, so
+  // you can watch the tail wag speed follow. Limited to 1..6: any faster and
+  // the fish's turning circle becomes too big for our tank walls (step 1.8).
+  if (event.key === 'ArrowUp') {
+    maxSpeed = Math.min(maxSpeed + 1, 6);
+    console.log('maxSpeed =', maxSpeed);
+  }
+  if (event.key === 'ArrowDown') {
+    maxSpeed = Math.max(maxSpeed - 1, 1);
+    console.log('maxSpeed =', maxSpeed);
   }
 });
 
@@ -573,10 +613,18 @@ function animate() {
     fish.lookAt(fishLookTarget);
   }
 
-  // WAG the tail: a sine of elapsed time, scaled by the amplitude.
-  const elapsedSeconds = timer.getElapsed();
-  tailPivot.rotation.y =
-    Math.sin(elapsedSeconds * tailWag.frequency * 2 * Math.PI) * tailWag.amplitude;
+  // WAG the tail. 1) How fast is the fish really swimming? The length of the
+  // velocity arrow (after this frame's steering) is its speed.
+  const currentSpeed = fishVelocity.length();
+  // 2) Map speed -> wag frequency (a straight line, see the notes above).
+  const wagFrequency = tailWag.baseFrequency + currentSpeed * tailWag.frequencyPerSpeed;
+  // 3) Advance the phase: cycles/second * (2 * PI radians per cycle) * seconds.
+  tailWagPhase += wagFrequency * 2 * Math.PI * deltaSeconds;
+  // 4) The tail angle is a sine of the phase, scaled by the amplitude.
+  tailPivot.rotation.y = Math.sin(tailWagPhase) * tailWag.amplitude;
+
+  swimStats.swimSpeed = Number(currentSpeed.toFixed(2));
+  swimStats.wagFrequency = Number(wagFrequency.toFixed(2));
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.
