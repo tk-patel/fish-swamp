@@ -14,6 +14,32 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const scene = new THREE.Scene();
 
 // ---------------------------------------------------------------------------
+// UNDERWATER MOOD, part 1: background + fog (step 0.5)
+//
+// Background: the color painted wherever nothing else is drawn. Before this
+// it was black (the renderer default), which looks like space, not water.
+// A THREE.Color can be made from a hex number: 0xRRGGBB, so 0x0a4a5c means
+// red = 0x0a, green = 0x4a, blue = 0x5c -> a deep blue-green.
+//
+// Fog: objects far from the camera get blended toward the fog color, so they
+// fade into the "murk". This is the single cheapest trick for faking water.
+//   - Fog / linear:   fade starts at a `near` distance, fully gone at `far`.
+//                     Easy to reason about, but the fade has hard-ish edges.
+//   - FogExp2 / exponential: the fog thickens smoothly with distance, the way
+//                     real haze does: blend = 1 - e^(-(density * distance)^2).
+//                     You only tune one number: `density`.
+// We use FogExp2 because it looks more natural.
+//
+// IMPORTANT: the fog color must equal the background color. If it didn't,
+// far objects would fade into one color while the empty space behind them is
+// another, and you'd see a visible "halo" of the wrong color.
+// ---------------------------------------------------------------------------
+const waterColor = new THREE.Color(0x0a4a5c);
+scene.background = waterColor;
+const fogDensity = 0.025; // bigger = murkier. Try 0.01 (clear) to 0.06 (soup).
+scene.fog = new THREE.FogExp2(waterColor, fogDensity);
+
+// ---------------------------------------------------------------------------
 // 2. CAMERA - the "eye". PerspectiveCamera behaves like a real camera or your
 //    eye: things farther away look smaller.
 //
@@ -31,9 +57,10 @@ const camera = new THREE.PerspectiveCamera(
   1000,
 );
 // By default the camera sits at (0, 0, 0) looking down the -Z axis.
-// The cube is also at (0, 0, 0), so we back the camera up along +Z
-// (towards us) to avoid sitting inside the cube.
-camera.position.z = 5;
+// Our tank will be a box about 40 x 20 x 30 units centered on the origin, so
+// we back the camera up along +Z (towards us) and lift it a little (+Y)
+// to see all of it. OrbitControls (below) looks at the origin by default.
+camera.position.set(0, 5, 35);
 
 // ---------------------------------------------------------------------------
 // 3. RENDERER - the "photographer". It takes the scene + camera and paints
@@ -73,7 +100,7 @@ window.addEventListener('resize', () => {
 // ORBIT CONTROLS - lets you move the camera with the mouse:
 //   drag = orbit around the target, scroll = zoom, right-drag = pan.
 // "Orbit" means the camera moves on a sphere around a target point
-// (by default the origin, (0, 0, 0), where the cube is) and always looks at it.
+// (by default the origin, (0, 0, 0), the center of our tank) and always looks at it.
 //
 // Damping adds inertia: after you let go the camera glides to a stop
 // instead of halting instantly. It feels much smoother, but it only works
@@ -84,27 +111,58 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.05; // smaller = longer glide
 
 // ---------------------------------------------------------------------------
-// A MESH = geometry + material.
-//   Geometry: the SHAPE (a list of points/triangles). BoxGeometry(1, 1, 1)
-//             is a cube 1 unit wide, tall and deep.
-//   Material: the SURFACE LOOK (color, shininess...). MeshStandardMaterial
-//             reacts to lights, so it needs a light to be visible.
-//   Mesh:     glues the two together so the renderer can draw it.
+// UNDERWATER MOOD, part 2: lights
+//
+// Without light, a MeshStandardMaterial renders pure black. We use two:
+//
+// 1. HemisphereLight = soft "ambient" light from the whole sky dome.
+//    You give it a SKY color (used by surfaces facing up) and a GROUND color
+//    (used by surfaces facing down); surfaces facing sideways get a blend.
+//    Underwater, light comes down from the bright surface, and the deep
+//    below is dark and blue-green, so: pale cyan on top, dark teal below.
+//    It has no direction and casts no shadows, so it gently fills in the
+//    areas the sun doesn't reach (no pitch-black undersides).
+//
+// 2. DirectionalLight = the "sun" shining down through the water.
+//    Parallel rays from one direction; its position only defines WHICH
+//    direction (towards the origin). It adds the shaded/lit look that makes
+//    shapes feel 3D. We keep it soft (low intensity, slightly blue-white)
+//    since light is scattered underwater.
 // ---------------------------------------------------------------------------
-const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
-const cubeMaterial = new THREE.MeshStandardMaterial({ color: 0x44aaff });
-const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
-scene.add(cube);
+const skyColor = 0x9fe6ff; // light from above
+const groundColor = 0x06232c; // light bounced up from the deep
+const hemisphereLight = new THREE.HemisphereLight(skyColor, groundColor, 1.2);
+scene.add(hemisphereLight);
+
+const sunLight = new THREE.DirectionalLight(0xcfefff, 1.5);
+sunLight.position.set(10, 30, 10); // high above, slightly off-center
+scene.add(sunLight);
 
 // ---------------------------------------------------------------------------
-// LIGHT - without one, a MeshStandardMaterial renders pure black.
-// A DirectionalLight is like the sun: parallel rays from one direction.
-// Its position only sets the direction the light comes from (towards the
-// origin by default). Here: from the upper-right, in front.
+// TEMPORARY REFERENCE OBJECTS (sense of depth) - remove once fish exist.
+// An empty blue-green void has no scale, so you can't tell how far anything
+// is. These give your eye something to measure against:
+//   - GridHelper: a flat grid of lines acting as the tank floor. The tank is
+//     20 tall and centered on y = 0, so its floor is at y = -10.
+//     Args: total size (120), number of divisions (60 -> 2-unit squares),
+//     color of the center lines, color of the other lines.
+//   - A few spheres at increasing distance, so you can watch the nearer ones
+//     look crisp and lit while the far ones melt into the fog.
 // ---------------------------------------------------------------------------
-const sunLight = new THREE.DirectionalLight(0xffffff, 3);
-sunLight.position.set(3, 4, 5);
-scene.add(sunLight);
+const referenceFloor = new THREE.GridHelper(120, 60, 0x4fb8c8, 0x1d7a8a);
+referenceFloor.position.y = -10;
+scene.add(referenceFloor);
+
+const referenceSphereGeometry = new THREE.SphereGeometry(1.5, 24, 16);
+const referenceSphereMaterial = new THREE.MeshStandardMaterial({ color: 0xffa94d });
+const referenceSphereZPositions = [15, 0, -15, -30, -45];
+referenceSphereZPositions.forEach((z, index) => {
+  const sphere = new THREE.Mesh(referenceSphereGeometry, referenceSphereMaterial);
+  // Alternate left/right so they don't hide behind each other.
+  const x = index % 2 === 0 ? -5 : 5;
+  sphere.position.set(x, -4, z);
+  scene.add(sphere);
+});
 
 // ---------------------------------------------------------------------------
 // TIMER - measures real time between frames.
@@ -116,11 +174,6 @@ scene.add(sunLight);
 // ---------------------------------------------------------------------------
 const timer = new THREE.Timer();
 timer.connect(document);
-
-// Spin speed in RADIANS PER SECOND (a full turn = 2 * PI ~ 6.28 radians).
-// 0.6 rad/s is what 0.01 rad/frame gave us on a 60 Hz screen (0.01 * 60).
-// Notice the unit is "per second", not "per frame". That is the whole point.
-const spinSpeed = 0.6;
 
 // ---------------------------------------------------------------------------
 // RENDER LOOP - a movie is many still pictures shown quickly. Each pass of
@@ -139,18 +192,10 @@ function animate() {
   // DELTA TIME = seconds since the previous frame.
   //   60 Hz screen  -> about 0.0167 s (1/60)
   //   144 Hz screen -> about 0.0069 s (1/144)
+  // Nothing in the scene moves by itself yet, so we don't use this value
+  // right now. Fish will use it from step 1.4 on, always as
+  // `movement = speed (units per second) * deltaSeconds` (see step 0.3).
   const deltaSeconds = timer.getDelta();
-
-  // Movement = speed (units per second) * time passed (seconds).
-  // Same idea as distance = speed * time from school physics.
-  //
-  // Why not the old `rotation += 0.01` per frame? That ties speed to the
-  // number of frames. On a 144 Hz monitor there are 2.4x more frames each
-  // second, so the cube would spin 2.4x faster (and slower on a laggy
-  // machine). With delta time, a faster screen just takes smaller steps
-  // more often, and the cube covers the same angle per real second.
-  cube.rotation.x += spinSpeed * deltaSeconds;
-  cube.rotation.y += spinSpeed * deltaSeconds;
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.

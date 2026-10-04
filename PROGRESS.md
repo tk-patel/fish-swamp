@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 0.5 (next up)
-**Last updated:** 2026-10-04 (finished 0.4)
+**Current step:** 1.1 (next up)
+**Last updated:** 2026-10-04 (finished 0.5)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -12,7 +12,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 0.2 Scene, camera, renderer, spinning cube
 - [x] 0.3 Delta time
 - [x] 0.4 Resize and OrbitControls
-- [ ] 0.5 Underwater mood (background, fog, lights)
+- [x] 0.5 Underwater mood (background, fog, lights)
 
 ### Phase 1 — One fish
 - [ ] 1.1 Fish body from primitives
@@ -85,6 +85,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 0.2 — scene + perspective camera + WebGL renderer + lit spinning cube, render loop via requestAnimationFrame — commit 4b35f9a — Rotation is intentionally per-frame (naive); step 0.3 fixes it with delta time. Canvas background is black until step 0.5.
 - step 0.3 — cube spin now `speed (rad/s) * deltaSeconds` using THREE.Timer — commit 44d6caa — PLAN says THREE.Clock, but Clock is deprecated since r183 (we have r186), so I used THREE.Timer, its replacement. Same concept. Our test browser ran rAF at ~120 Hz, a real-life example of why delta time matters.
 - step 0.4 — resize handler (camera aspect + projection matrix + renderer size), pixel ratio capped at 2, OrbitControls with damping — commit e2e59bb — OrbitControls lives in `three/addons/...`. Verified canvas follows viewport size and uses 2x pixels on a Retina display; drag-orbit itself was not automated-tested, try it by hand.
+- step 0.5 — teal background + matching FogExp2, hemisphere + directional light, cube removed, temporary grid floor (y = -10) and 5 reference spheres — commit: see `git log` ("step 0.5") — The reference spheres are my addition so fog and lighting are actually visible; delete them and the grid when they stop being useful (grid probably at 1.8 when the tank wireframe appears). `deltaSeconds` is computed but unused until step 1.4.
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
