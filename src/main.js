@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
+import { moodState, moodToFlockWeights } from './mood.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -303,6 +304,9 @@ function animate() {
   // Always move things as `speed (units per second) * deltaSeconds`
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
+
+  // Step 5.1 — mood drives the same weights the flock GUI edits (edit moodState in mood.js).
+  Object.assign(flockSettings, moodToFlockWeights(moodState.energy, moodState.chaos));
 
   flock.update(deltaSeconds);
 
