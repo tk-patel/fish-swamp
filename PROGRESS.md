@@ -82,7 +82,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 (One entry per finished step: `step X.Y — what changed — commit hash — anything surprising`)
 
 - step 0.1 — Vite + three installed, blank page, `src/main.js` logs hello — commit 3137c76 — Wrote the Vite files by hand instead of `npm create vite` to avoid template extras (counter demo, etc.).
-- step 0.2 — scene + perspective camera + WebGL renderer + lit spinning cube, render loop via requestAnimationFrame — commit: see `git log` ("step 0.2") — Rotation is intentionally per-frame (naive); step 0.3 fixes it with delta time. Canvas background is black until step 0.5.
+- step 0.2 — scene + perspective camera + WebGL renderer + lit spinning cube, render loop via requestAnimationFrame — commit 4b35f9a — Rotation is intentionally per-frame (naive); step 0.3 fixes it with delta time. Canvas background is black until step 0.5.
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
