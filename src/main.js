@@ -162,6 +162,28 @@ const fishAxes = new THREE.AxesHelper(2.5);
 fish.add(fishAxes);
 
 // ---------------------------------------------------------------------------
+// FISH VELOCITY (step 1.4)
+//
+// A THREE.Vector3 is just three numbers (x, y, z). The same type is used for
+// two different ideas, which is a common source of confusion:
+//   - a POINT in space:  "the fish is AT (2, 1, 0)"       -> fish.position
+//   - an ARROW / change: "the fish moves BY (2, 1, 0)/sec" -> velocity
+//
+// VELOCITY = speed AND direction in one arrow:
+//   - the arrow's direction is where the fish is heading
+//   - the arrow's length is how fast (units per second)
+// Here: 1.5 units/sec along X, 0.3 up, 2.0 along Z.
+// Its length is sqrt(1.5^2 + 0.3^2 + 2.0^2) = about 2.5 units per second,
+// which is the SPEED. `velocity.length()` gives you that number.
+// ---------------------------------------------------------------------------
+const fishVelocity = new THREE.Vector3(1.5, 0.3, 2.0);
+
+// A reusable scratch Vector3 for "the point the fish should look at".
+// We make it once, outside the render loop, and refill it each frame,
+// because creating new objects 60 times a second adds up (garbage collection).
+const fishLookTarget = new THREE.Vector3();
+
+// ---------------------------------------------------------------------------
 // TEMPORARY REFERENCE OBJECTS (sense of depth) - remove once fish exist.
 // An empty blue-green void has no scale, so you can't tell how far anything
 // is. These give your eye something to measure against:
@@ -219,11 +241,20 @@ function animate() {
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
 
-  // TEMPORARY (step 1.3): turn the fish around its local Y (up) axis, 0.8
-  // radians per second, to watch the axes and the nose rotate with it.
-  // The blue line (+Z) and the nose should always stay together.
-  // Delta time again: speed per second * seconds since last frame.
-  fish.rotation.y += 0.8 * deltaSeconds;
+  // MOVE the fish: new position = old position + velocity * time passed.
+  // velocity is "units per second", deltaSeconds is "seconds", so
+  // velocity * deltaSeconds is "units to move in THIS frame". E.g. at
+  // 2.5 units/s and a 60 Hz frame (0.0167 s) the fish moves ~0.04 units.
+  // addScaledVector(v, s) does exactly `position += v * s` in one call,
+  // without creating a temporary vector.
+  fish.position.addScaledVector(fishVelocity, deltaSeconds);
+
+  // POINT the fish along its velocity. Our convention is that the nose is
+  // local +Z (see fish.js), and Object3D.lookAt() turns an object so +Z
+  // faces a world-space point. The point one velocity-arrow ahead of the
+  // fish is exactly "where it is going": position + velocity.
+  fishLookTarget.copy(fish.position).add(fishVelocity);
+  fish.lookAt(fishLookTarget);
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.
