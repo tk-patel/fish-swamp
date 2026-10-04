@@ -48,5 +48,76 @@ export function createFish() {
   // Group) it is in.
   fish.add(body);
 
+  // ---- Tail ---------------------------------------------------------------
+  // PIVOT POINT: an object rotates around its own origin (0, 0, 0). A door
+  // swings around its hinge, not around its middle. For a tail to wag, the
+  // "hinge" must be where the tail joins the body. A mesh's origin sits at
+  // the center of its geometry, so if we rotated the tail mesh directly it
+  // would spin around its own middle and look wrong.
+  //
+  // The trick: put the tail mesh INSIDE an empty Group (the "pivot"), and
+  // offset the mesh within it so that its joint end sits exactly at the
+  // pivot's origin. Then rotating the PIVOT swings the tail around the joint.
+  // (Step 2.1 will do exactly that with a sine wave.)
+  const tailPivot = new THREE.Group();
+  tailPivot.name = 'tailPivot'; // a label so later code can find it
+  // The body's back end is at z = -1. We put the joint just inside it
+  // (z = -0.9) so there is no visible gap between the body and the tail.
+  tailPivot.position.set(0, 0, -0.9);
+  fish.add(tailPivot);
+
+  // A cone is the simplest triangle-like fin shape. ConeGeometry(radius,
+  // height, radialSegments) is a cone standing upright: tip at +Y, round
+  // base at -Y, centered on its own middle.
+  const tailLength = 0.8; // how far the fin sticks out behind the joint
+  const tailRadius = 0.5; // half the height of the fin
+  const tailGeometry = new THREE.ConeGeometry(tailRadius, tailLength, 16);
+  const tailMaterial = new THREE.MeshStandardMaterial({ color: 0xe0661f });
+  const tailMesh = new THREE.Mesh(tailGeometry, tailMaterial);
+
+  // We want: tip touching the joint, wide base at the very back (-Z).
+  // The cone's tip points along +Y, so we tilt it 90 degrees around X
+  // (Math.PI / 2 radians = 90 degrees). A rotation of +90 degrees around X
+  // turns the +Y direction into +Z, so the tip now points forward, towards
+  // the body, and the base faces backwards.
+  tailMesh.rotation.x = Math.PI / 2;
+
+  // FLATTEN: a fish tail is a thin vertical blade, not a round cone.
+  // Scale is applied BEFORE the rotation above, in the cone's own axes
+  // (cone x = across, y = length, z = depth). After the 90-degree tilt, the
+  // cone's x axis stays world X, and its z axis becomes world -Y. So:
+  //   x = 0.1 -> only 10% as wide: thin from side to side
+  //   z = 1.0 -> keeps the full height of the fin (up and down)
+  tailMesh.scale.set(0.1, 1.0, 1.0);
+
+  // The cone is centered on its own middle, so shift it half its length
+  // backwards: now its tip is exactly at the pivot's origin (the joint) and
+  // the fin extends from there towards -Z.
+  tailMesh.position.z = -tailLength / 2;
+  tailPivot.add(tailMesh);
+
+  // ---- Eyes ---------------------------------------------------------------
+  // Two small dark spheres, one on each side of the head, mirrored in X.
+  const eyeGeometry = new THREE.SphereGeometry(0.08, 12, 8);
+  const eyeMaterial = new THREE.MeshStandardMaterial({ color: 0x111111 });
+
+  // Where? Near the nose (z = 0.6), a little above the middle (y = 0.1).
+  // The body surface there is about 0.27 units out from the center on X, so
+  // x = 0.25 puts the eye center just inside the skin: half the ball sticks
+  // out and reads as an eye.
+  const eyeX = 0.25;
+  const eyeY = 0.1;
+  const eyeZ = 0.6;
+
+  const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+  rightEye.position.set(eyeX, eyeY, eyeZ);
+  fish.add(rightEye);
+
+  // Mirror image: same numbers, but flip the sign of X. We reuse the same
+  // geometry and material objects; only the position differs.
+  const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+  leftEye.position.set(-eyeX, eyeY, eyeZ);
+  fish.add(leftEye);
+
   return fish;
 }

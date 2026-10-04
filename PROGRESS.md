@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 1.2 (next up)
-**Last updated:** 2026-10-04 (finished 1.1)
+**Current step:** 1.3 (next up)
+**Last updated:** 2026-10-04 (finished 1.2)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -16,7 +16,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 
 ### Phase 1 — One fish
 - [x] 1.1 Fish body from primitives
-- [ ] 1.2 Tail and eyes
+- [x] 1.2 Tail and eyes
 - [ ] 1.3 Forward direction convention
 - [ ] 1.4 Move with a velocity vector
 - [ ] 1.5 Steering toward a target
@@ -87,6 +87,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 0.4 — resize handler (camera aspect + projection matrix + renderer size), pixel ratio capped at 2, OrbitControls with damping — commit e2e59bb — OrbitControls lives in `three/addons/...`. Verified canvas follows viewport size and uses 2x pixels on a Retina display; drag-orbit itself was not automated-tested, try it by hand.
 - step 0.5 — teal background + matching FogExp2, hemisphere + directional light, cube removed, temporary grid floor (y = -10) and 5 reference spheres — commit 14cf586 — The reference spheres are my addition so fog and lighting are actually visible; delete them and the grid when they stop being useful (grid probably at 1.8 when the tank wireframe appears). `deltaSeconds` is computed but unused until step 1.4.
 - step 1.1 — new `src/fish.js` with `createFish()` returning a Group holding an ellipsoid body (sphere scaled 0.35 x 0.5 x 1.0, so ~2 units long on Z); added to the scene in main.js — commit 9338dd2 — AGENTS.md's unit rule ("1 unit ~ 1 fish body length * 2") was ambiguous; I read it as 1 unit = half a body length, i.e. fish ~2 units long. Camera is temporarily closer at (7, 2, 4); back to (0, 5, 35) at step 1.8.
+- step 1.2 — flattened cone tail inside a `tailPivot` Group (joint at z = -0.9, named 'tailPivot' for step 2.1), two dark sphere eyes mirrored in X — commit: see `git log` ("step 1.2") — Only fish.js changed. Tail tip sits at the joint, wide base faces -Z.
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
