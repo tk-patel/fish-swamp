@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 4.5 (next up)
-**Last updated:** 2026-10-04 (finished 4.4)
+**Current step:** 4.6 (next up)
+**Last updated:** 2026-10-04 (finished 4.5)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -44,7 +44,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 4.2 Separation
 - [x] 4.3 Alignment
 - [x] 4.4 Cohesion
-- [ ] 4.5 Limits and balance
+- [x] 4.5 Limits and balance
 - [ ] 4.6 Tuning panel and presets
 - [ ] 4.7 Performance check
 
@@ -108,7 +108,8 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 4.1 — findNeighbors() with dist² < r²; debug watch fish (magenta), neighbors (cyan), wire perception sphere; N key cycles watch index — (commit pending)
 - step 4.2 — separation steering (away vector / dist²), averaged, weighted 1.8, summed with wander + bounds before clamp — (commit pending)
 - step 4.3 — alignment: average neighbor velocity, steer toward it (weight 1.0) — (commit pending)
-- step 4.4 — cohesion: steer toward neighbor center of mass (weight 1.0) — (commit pending)
+- step 4.4 — cohesion: steer toward neighbor center of mass (weight 1.0) — 9c8e4e3
+- step 4.5 — flockSettings min/max speed, enforceSpeedLimits, tuned weights, cohesion steer fix — (commit pending)
 
 ## Final tuned values
 (Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)

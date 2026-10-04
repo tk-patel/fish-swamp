@@ -13,8 +13,6 @@
 import * as THREE from 'three';
 import { createFishInstancedMesh, fishWaveSettings } from './fish.js';
 
-const maxSpeed = 3;
-const maxSteeringForce = 5;
 const boundaryMargin = 5;
 const boundaryWeight = 30;
 const wanderDistance = 4;
@@ -22,15 +20,22 @@ const wanderRadius = 2;
 const wanderJitter = 6;
 const turnRate = 5;
 
-// How far each fish "sees" other fish (units). Boid forces in 4.2–4.4 use this.
-// Compare squared distance to perceptionRadius² so we skip sqrt (same ordering).
-export const perceptionRadius = 8;
-const perceptionRadiusSq = perceptionRadius * perceptionRadius;
+// Step 4.5: speed floor + ceiling and gentler boid weights to reduce jitter/stalls.
+export const flockSettings = {
+  minSpeed: 0.9,
+  maxSpeed: 2.8,
+  maxSteeringForce: 4.5,
+  separationWeight: 1.6,
+  alignmentWeight: 0.85,
+  cohesionWeight: 0.75,
+  wanderWeight: 1.0,
+  perceptionRadius: 8,
+};
 
-// Boid rule weights (tuning panel in step 4.6).
-export const separationWeight = 1.8;
-export const alignmentWeight = 1.0;
-export const cohesionWeight = 1.0;
+function getPerceptionRadiusSq() {
+  const r = flockSettings.perceptionRadius;
+  return r * r;
+}
 
 // Scratch objects — one set for the whole flock loop (no per-fish allocation).
 const position = new THREE.Vector3();
@@ -81,7 +86,7 @@ function randomUnitVelocity(velocities, index) {
   // Random direction on the sphere, then scale to a random speed up to maxSpeed.
   const theta = Math.random() * Math.PI * 2;
   const phi = Math.acos(2 * Math.random() - 1);
-  const speed = maxSpeed * (0.4 + Math.random() * 0.6);
+  const speed = flockSettings.maxSpeed * (0.4 + Math.random() * 0.6);
   velocities[index * 3 + 0] = Math.sin(phi) * Math.cos(theta) * speed;
   velocities[index * 3 + 1] = Math.sin(phi) * Math.sin(theta) * speed;
   velocities[index * 3 + 2] = Math.cos(phi) * speed;
@@ -126,7 +131,7 @@ export function findNeighbors(fishIndex, positions, count, outNeighborIndices) {
     const dy = positions[pj + 1] - ay;
     const dz = positions[pj + 2] - az;
     const distanceSq = dx * dx + dy * dy + dz * dz;
-    if (distanceSq < perceptionRadiusSq) {
+    if (distanceSq < getPerceptionRadiusSq()) {
       outNeighborIndices[neighborCount] = j;
       neighborCount += 1;
     }
@@ -190,6 +195,20 @@ function accumulateCohesionCenter(positions, neighborIndices, neighborCount, out
 function addSteerTowardDesired(desired, weight) {
   boidSteering.subVectors(desired, velocity);
   steeringForce.addScaledVector(boidSteering, weight);
+}
+
+/** Fish must keep swimming; if forces cancel out, nudge back to minSpeed. */
+function enforceSpeedLimits() {
+  const minSpeed = flockSettings.minSpeed;
+  const maxSpeed = flockSettings.maxSpeed;
+  const speedSq = velocity.lengthSq();
+  if (speedSq < minSpeed * minSpeed) {
+    if (speedSq < 1e-8) {
+      velocity.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+    }
+    velocity.multiplyScalar(minSpeed / Math.sqrt(speedSq || 1));
+  }
+  velocity.clampLength(minSpeed, maxSpeed);
 }
 
 function setInstanceColorFromBase(mesh, index, baseColors) {
@@ -276,7 +295,7 @@ export function createFlock(count, tankSize) {
 
   // TEMPORARY debug (step 4.1): wire sphere = perception radius around watched fish.
   const perceptionSphereDebug = new THREE.Mesh(
-    new THREE.SphereGeometry(perceptionRadius, 24, 16),
+    new THREE.SphereGeometry(1, 24, 16),
     new THREE.MeshBasicMaterial({
       color: 0x66ccff,
       wireframe: true,
@@ -314,36 +333,41 @@ export function createFlock(count, tankSize) {
       wanderOffsets[pi + 1] = wanderOffset.y;
       wanderOffsets[pi + 2] = wanderOffset.z;
 
-      wanderSphereCenter.copy(velocity).normalize().multiplyScalar(wanderDistance);
+      if (velocity.lengthSq() > 1e-8) {
+        wanderSphereCenter.copy(velocity).normalize().multiplyScalar(wanderDistance);
+      } else {
+        wanderSphereCenter.set(wanderDistance, 0, 0);
+      }
       wanderSphereCenter.x += px;
       wanderSphereCenter.y += py;
       wanderSphereCenter.z += pz;
 
       wanderPoint.copy(wanderSphereCenter).add(wanderOffset);
 
+      const maxSpeed = flockSettings.maxSpeed;
       desiredVelocity.subVectors(wanderPoint, position.set(px, py, pz)).normalize().multiplyScalar(maxSpeed);
-      steeringForce.subVectors(desiredVelocity, velocity);
+      steeringForce.subVectors(desiredVelocity, velocity).multiplyScalar(flockSettings.wanderWeight);
 
       const neighborCount = findNeighbors(i, positions, count, neighborScratch);
       accumulateSeparation(px, py, pz, positions, neighborScratch, neighborCount, separationSum);
       if (separationSum.lengthSq() > 1e-8) {
         desiredVelocity.copy(separationSum).normalize().multiplyScalar(maxSpeed);
-        addSteerTowardDesired(desiredVelocity, separationWeight);
+        addSteerTowardDesired(desiredVelocity, flockSettings.separationWeight);
       }
 
       if (neighborCount > 0) {
         accumulateAlignmentAverage(velocities, neighborScratch, neighborCount, alignmentAverage);
         if (alignmentAverage.lengthSq() > 1e-8) {
           desiredVelocity.copy(alignmentAverage).normalize().multiplyScalar(maxSpeed);
-          addSteerTowardDesired(desiredVelocity, alignmentWeight);
+          addSteerTowardDesired(desiredVelocity, flockSettings.alignmentWeight);
         }
 
         accumulateCohesionCenter(positions, neighborScratch, neighborCount, cohesionCenter);
-        desiredVelocity
-          .subVectors(cohesionCenter, position.set(px, py, pz))
-          .normalize()
-          .multiplyScalar(maxSpeed);
-        addSteerTowardDesired(desiredVelocity, cohesionWeight);
+        desiredVelocity.subVectors(cohesionCenter, position.set(px, py, pz));
+        if (desiredVelocity.lengthSq() > 1e-8) {
+          desiredVelocity.normalize().multiplyScalar(maxSpeed);
+          addSteerTowardDesired(desiredVelocity, flockSettings.cohesionWeight);
+        }
       }
 
       boundaryForce.set(
@@ -352,16 +376,16 @@ export function createFlock(count, tankSize) {
         getAxisBoundaryPush(pz, tankHalfSize.z),
       );
       steeringForce.addScaledVector(boundaryForce, boundaryWeight);
-      steeringForce.clampLength(0, maxSteeringForce);
+      steeringForce.clampLength(0, flockSettings.maxSteeringForce);
 
       velocity.addScaledVector(steeringForce, deltaSeconds);
-      velocity.clampLength(0, maxSpeed);
+      enforceSpeedLimits();
       velocities[pi] = velocity.x;
       velocities[pi + 1] = velocity.y;
       velocities[pi + 2] = velocity.z;
 
       const speed = velocity.length();
-      const speedRatio = speed / maxSpeed;
+      const speedRatio = speed / flockSettings.maxSpeed;
       // Faster fish advance swim phase faster; amplitude scales with speed too.
       swimPhases[i] += fishWaveSettings.speed * (0.35 + 0.65 * speedRatio) * deltaSeconds;
       wiggleMul[i] = 0.45 + 0.55 * speedRatio;
@@ -391,6 +415,8 @@ export function createFlock(count, tankSize) {
 
     const wi = watchFishIndex * 3;
     perceptionSphereDebug.position.set(positions[wi], positions[wi + 1], positions[wi + 2]);
+    const pr = flockSettings.perceptionRadius;
+    perceptionSphereDebug.scale.set(pr, pr, pr);
   }
 
   return {
