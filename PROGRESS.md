@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 5.2 (next up) — step 5.1 done
-**Last updated:** 2026-10-04 (finished 5.1)
+**Current step:** 5.3 (next up) — step 5.2 done
+**Last updated:** 2026-10-04 (finished 5.2)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -50,7 +50,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 
 ### Phase 5 — Moods (no mic)
 - [x] 5.1 Mood object
-- [ ] 5.2 Fake input (sliders/keys)
+- [x] 5.2 Fake input (sliders/keys)
 - [ ] 5.3 Mapping design (silence / calm / chaos)
 - [ ] 5.4 Flee force
 - [ ] 5.5 Smoothing transitions
@@ -113,6 +113,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 4.6 — lil-gui Flocking folder + idle/tightSchool/scatter presets — 418e84d
 - step 4.7 — ?fish=N count param, stats show fish count; perf notes below — (commit pending)
 - step 5.1 — `src/mood.js`: moodState { energy, chaos } + pure moodToFlockWeights(); main applies each frame — a5d9879
+- step 5.2 — Mood lil-gui folder + keys 1/2/3 and moodPresets silence/calm/chaos — d20dbd6
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.

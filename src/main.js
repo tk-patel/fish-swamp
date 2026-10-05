@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
-import { moodState, moodToFlockWeights } from './mood.js';
+import { applyMoodPreset, moodState, moodToFlockWeights } from './mood.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -269,6 +269,40 @@ const presetActions = {
 flockFolder.add(presetActions, 'idle').name('preset: idle');
 flockFolder.add(presetActions, 'tightSchool').name('preset: tight school');
 flockFolder.add(presetActions, 'scatter').name('preset: scatter');
+
+// Step 5.2 — drive mood before it becomes microphone input (phase 6).
+const moodFolder = gui.addFolder('Mood');
+const moodEnergyController = moodFolder.add(moodState, 'energy', 0, 1, 0.01).name('energy');
+const moodChaosController = moodFolder.add(moodState, 'chaos', 0, 1, 0.01).name('chaos');
+
+function refreshMoodGuiDisplays() {
+  moodEnergyController.updateDisplay();
+  moodChaosController.updateDisplay();
+}
+
+function setMoodPreset(presetName) {
+  applyMoodPreset(presetName);
+  refreshMoodGuiDisplays();
+}
+
+const moodPresetActions = {
+  silence: () => setMoodPreset('silence'),
+  calm: () => setMoodPreset('calm'),
+  chaos: () => setMoodPreset('chaos'),
+};
+moodFolder.add(moodPresetActions, 'silence').name('silence (key 1)');
+moodFolder.add(moodPresetActions, 'calm').name('calm (key 2)');
+moodFolder.add(moodPresetActions, 'chaos').name('chaos (key 3)');
+
+window.addEventListener('keydown', (event) => {
+  if (event.key === '1') {
+    setMoodPreset('silence');
+  } else if (event.key === '2') {
+    setMoodPreset('calm');
+  } else if (event.key === '3') {
+    setMoodPreset('chaos');
+  }
+});
 
 let framesSinceStatsUpdate = 0;
 let secondsSinceStatsUpdate = 0;

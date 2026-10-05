@@ -7,13 +7,30 @@
 import { flockPresets } from './flock.js';
 
 /**
- * Placeholder inputs until the mic (phase 6) and GUI sliders (step 5.2).
- * Both are 0..1. Change these numbers, save, and reload to see the flock shift.
+ * Live inputs: lil-gui sliders (step 5.2) and later the microphone (phase 6).
+ * Both are 0..1.
  */
 export const moodState = {
   energy: 0,
   chaos: 0,
 };
+
+/** Keyboard / GUI targets for step 5.2 (step 5.3 will refine the mapping). */
+export const moodPresets = {
+  silence: { energy: 0, chaos: 0 },
+  calm: { energy: 1, chaos: 0 },
+  chaos: { energy: 0, chaos: 1 },
+};
+
+/** Copy a named preset into moodState (mutates moodState only). */
+export function applyMoodPreset(presetName) {
+  const preset = moodPresets[presetName];
+  if (!preset) {
+    return;
+  }
+  moodState.energy = preset.energy;
+  moodState.chaos = preset.chaos;
+}
 
 function clamp01(value) {
   return Math.min(1, Math.max(0, value));
