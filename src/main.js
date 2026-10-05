@@ -7,7 +7,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
-import { requestMicrophonePermission } from './audio.js';
+import {
+  getMicrophoneAnalysisBuffers,
+  isMicrophoneAnalysisReady,
+  requestMicrophonePermission,
+  sampleMicrophoneAnalysis,
+  startMicrophoneAnalysis,
+} from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
@@ -121,8 +127,15 @@ micEnableButton.addEventListener('click', async () => {
   const result = await requestMicrophonePermission();
 
   if (result.granted) {
+    const analysis = await startMicrophoneAnalysis(result.stream);
+    if (!analysis.ok) {
+      micEnableButton.disabled = false;
+      showMicError(
+        analysis.error?.message ?? 'Microphone is on, but audio analysis failed to start.',
+      );
+      return;
+    }
     hideMicOverlay();
-    // Step 6.2 will connect this stream to an AudioContext and AnalyserNode.
     return;
   }
 
@@ -398,6 +411,12 @@ function animate() {
 
   flock.update(deltaSeconds);
 
+  // Step 6.2 — pull fresh time + frequency snapshots when the mic graph is running.
+  if (isMicrophoneAnalysisReady()) {
+    const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
+    sampleMicrophoneAnalysis(timeDomain, frequency);
+  }
+
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.
   controls.update();
@@ -416,6 +435,31 @@ function animate() {
       `fish:       ${fishCount}\n` +
       `draw calls: ${renderer.info.render.calls}\n` +
       `triangles:  ${renderer.info.render.triangles}`;
+
+    // Step 6.2 debug: speak and watch the console — values should rise above ~0.
+    if (isMicrophoneAnalysisReady()) {
+      const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
+      let peakFrequency = 0;
+      for (let i = 0; i < frequency.length; i += 1) {
+        if (frequency[i] > peakFrequency) {
+          peakFrequency = frequency[i];
+        }
+      }
+      let peakTimeDeviation = 0;
+      for (let i = 0; i < timeDomain.length; i += 1) {
+        const deviation = Math.abs(timeDomain[i] - 128);
+        if (deviation > peakTimeDeviation) {
+          peakTimeDeviation = deviation;
+        }
+      }
+      console.log(
+        '[audio] peak frequency byte:',
+        peakFrequency,
+        '| peak waveform deviation from silence:',
+        peakTimeDeviation,
+      );
+    }
+
     framesSinceStatsUpdate = 0;
     secondsSinceStatsUpdate = 0;
   }
