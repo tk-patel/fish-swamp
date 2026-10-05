@@ -78,6 +78,12 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [ ] 7.7 Mobile and performance
 - [ ] 7.8 Deploy
 
+### Phase 8 — Salmon pond makeover
+- [ ] 8.1 Clean turquoise pond, top-down camera, screen = pond
+- [ ] 8.2 Hidden controls, toggled with C
+- [ ] 8.3 Salmon instead of koi
+- [ ] 8.4 Mood tuning for the new pond
+
 ## Log
 (One entry per finished step: `step X.Y — what changed — commit hash — anything surprising`)
 

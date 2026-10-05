@@ -348,6 +348,20 @@ Each step has: **Goal**, **Learn**, **Tasks**, **Done when** (what you see in th
 ### 7.8 Deploy
 - Deploy to Vercel/Netlify/Cloudflare Pages (HTTPS is required for the mic). Learn: `vite build` and static hosting.
 
+## PHASE 8 — Salmon pond makeover
+
+### 8.1 Clean turquoise pond, fixed top-down camera, screen = pond
+- Remove floor, rocks, seaweed, caustics and light shafts. Keep the water gradient but make it bright turquoise (shallow water). Camera looks straight down and cannot be moved; the fish swim area is computed from what the camera sees, so the screen edges are the pond banks (recomputed on resize). Learn: camera frustum math (how much world a camera sees at a given distance).
+
+### 8.2 Hidden controls, toggled with "C"
+- lil-gui, the stats box and the audio meters start hidden; pressing C shows/hides them all. Learn: one piece of UI state driving several elements.
+
+### 8.3 Salmon instead of koi
+- Longer, slimmer, laterally compressed body with a pointed snout, adipose fin, moderately forked tail; silvery countershading with back speckles; salmon colour palette; wider size variety. Learn: shaping a body with simple profile functions.
+
+### 8.4 Mood tuning for the new pond
+- Silence: fish wander on their own but stay loosely together. Calm/hum: tight school. Chaos: scatter. Learn: how anchor weights shape behaviour.
+
 ---
 
 ## Step template for the agent's reply
