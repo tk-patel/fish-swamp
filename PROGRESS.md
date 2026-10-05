@@ -121,7 +121,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 6.1 — mic overlay + getUserMedia (raw audio constraints); deny/skip paths; fish keep running — 35f4d26
 - step 6.2 — AudioContext + AnalyserNode; per-frame sampleMicrophoneAnalysis; console debug peaks — 2f2120e
 - step 6.3 — RMS from time-domain bytes; on-screen volume bar — 87fbcf7
-- step 6.4 — 1 s noise floor + normalize to 0..1; R to recalibrate — (commit pending)
+- step 6.4 — 1 s noise floor + normalize to 0..1; R to recalibrate — 8640241
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.
