@@ -457,7 +457,11 @@ export function createFlock(count, tankSize) {
       const speed = velocity.length();
       const speedRatio = speed / flockSettings.maxSpeed;
       // Faster fish advance swim phase faster; amplitude scales with speed too.
-      swimPhases[i] += fishWaveSettings.speed * (0.35 + 0.65 * speedRatio) * deltaSeconds;
+      swimPhases[i] +=
+        fishWaveSettings.speed *
+        fishWaveSettings.moodSpeedMul *
+        (0.35 + 0.65 * speedRatio) *
+        deltaSeconds;
       wiggleMul[i] = 0.45 + 0.55 * speedRatio;
 
       position.set(px, py, pz).addScaledVector(velocity, deltaSeconds);

@@ -218,12 +218,16 @@ export const fishWaveUniforms = {
   // Distance along the body for one full S-curve. Fish are ~2.8 long, so 3.0
   // means "about one S-curve along the whole body".
   uWavelength: { value: 3.0 },
+  // Step 5.6: 0 = calm slow wag, 1 = panicked fast flap (set from mood in main.js).
+  uMood: { value: 0 },
 };
 
 // Base wave travel speed (rad/s). Each fish also scales phase growth by its
 // swim speed (step 3.4) via the per-instance aWiggleMul attribute.
 export const fishWaveSettings = {
   speed: 9.0,
+  // Multiplier on phase advance; main.js ties this to smoothed uMood.
+  moodSpeedMul: 1.0,
 };
 
 const WAVE_HEAD_Z = 0.8; // from here forward the body stays perfectly still
@@ -233,6 +237,7 @@ function addSwimWiggleToMaterial(material) {
     // Give the shader access to our uniform objects.
     shader.uniforms.uAmplitude = fishWaveUniforms.uAmplitude;
     shader.uniforms.uWavelength = fishWaveUniforms.uWavelength;
+    shader.uniforms.uMood = fishWaveUniforms.uMood;
 
     // Per-instance attributes (InstancedBufferAttribute on the geometry, step 3.4).
     shader.vertexShader = shader.vertexShader.replace(
@@ -240,6 +245,7 @@ function addSwimWiggleToMaterial(material) {
       `#include <common>
        uniform float uAmplitude;
        uniform float uWavelength;
+       uniform float uMood;
        attribute float aPhase;
        attribute float aWiggleMul;`,
     );
@@ -279,7 +285,10 @@ function addSwimWiggleToMaterial(material) {
        float waveNumber = 6.28318530718 / uWavelength;
        float wavePhase = transformed.z * waveNumber + aPhase;
 
-       transformed.x += sin(wavePhase) * uAmplitude * tailWeight * aWiggleMul;`,
+       // uMood (0 calm .. 1 panic): wider tail swing when the flock is chaotic.
+       float moodAmpMul = mix(0.72, 1.55, uMood);
+
+       transformed.x += sin(wavePhase) * uAmplitude * moodAmpMul * tailWeight * aWiggleMul;`,
     );
   };
 }

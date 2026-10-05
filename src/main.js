@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
-import { applyMoodPreset, moodState, moodToFlockWeights, smoothedFlockWeights, updateSmoothedFlockWeights } from './mood.js';
+import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -343,6 +343,10 @@ function animate() {
   const moodTargetWeights = moodToFlockWeights(moodState.energy, moodState.chaos);
   updateSmoothedFlockWeights(moodTargetWeights, deltaSeconds);
   Object.assign(flockSettings, smoothedFlockWeights);
+
+  updateSmoothedSwimMood(moodToSwimMood(moodState.energy, moodState.chaos), deltaSeconds);
+  fishWaveUniforms.uMood.value = smoothedSwimMood.uMood;
+  fishWaveSettings.moodSpeedMul = swimMoodToSpeedMultiplier(smoothedSwimMood.uMood);
 
   flock.update(deltaSeconds);
 

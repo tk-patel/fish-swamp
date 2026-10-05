@@ -144,3 +144,28 @@ export function updateSmoothedFlockWeights(targetWeights, deltaSeconds) {
     smoothedFlockWeights[key] = current + (target - current) * blend;
   }
 }
+
+/** Step 5.6: shader/phase panic level — mostly chaos, low when calm or silent. */
+export function moodToSwimMood(energy, chaos) {
+  const c = smoothstep01(chaos);
+  const e = smoothstep01(energy);
+  // High energy + low chaos = schooling but smooth tail; keep uMood low.
+  const calmLiveliness = e * (1 - c) * 0.15;
+  return clamp01(c * 0.92 + calmLiveliness);
+}
+
+export const smoothedSwimMood = { uMood: 0 };
+
+export function updateSmoothedSwimMood(targetUMood, deltaSeconds) {
+  const current = smoothedSwimMood.uMood;
+  const target = clamp01(targetUMood);
+  const rate =
+    target > current ? moodWeightSmoothing.attackRate : moodWeightSmoothing.releaseRate;
+  const blend = 1 - Math.exp(-rate * deltaSeconds);
+  smoothedSwimMood.uMood = current + (target - current) * blend;
+}
+
+/** CPU phase speed: calm ~0.55× base, panic ~1.75× base (matches shader feel). */
+export function swimMoodToSpeedMultiplier(uMood) {
+  return 0.55 + clamp01(uMood) * 1.2;
+}
