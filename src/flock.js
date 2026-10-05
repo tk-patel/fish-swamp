@@ -13,7 +13,8 @@
 import * as THREE from 'three';
 import { createFishInstancedMesh, fishWaveSettings } from './fish.js';
 
-const boundaryMargin = 3.5; // sideways: start turning back 3.5 units from the bank
+const boundaryMargin = 4; // sideways: start turning back 4 units from the bank
+// (koi are ~4.6 long, so they need a little more room to turn before the edge)
 // Up/down: the pond is only ~6 deep, so the soft zone at the surface and floor is smaller.
 const verticalBoundaryMargin = 1.5;
 // Shallow water: fish mostly cruise sideways. Each second vertical speed is
@@ -99,37 +100,6 @@ const lookMatrix = new THREE.Matrix4();
 const targetQuaternion = new THREE.Quaternion();
 const worldUp = new THREE.Vector3(0, 1, 0);
 const instancePlacement = new THREE.Object3D();
-const fishColorScratch = new THREE.Color();
-
-/**
- * Salmon palette (HSL = hue, saturation, lightness). This color is MULTIPLIED
- * with the grey pattern painted on the fish mesh (fish.js), so the pale belly,
- * the silvery side band and the back speckles keep their detail whatever color
- * the fish is. Mix of real salmon looks: silver-blue, olive, rosy pink and
- * spawning sockeye red.
- */
-function randomFishColor() {
-  const roll = Math.random();
-  if (roll < 0.4) {
-    // silver-blue Atlantic salmon (40%)
-    const r = Math.random();
-    return fishColorScratch.setHSL(0.55 + r * 0.04, 0.25 + r * 0.1, 0.62 + r * 0.08).clone();
-  }
-  if (roll < 0.6) {
-    // olive / green-grey back (20%)
-    const r = Math.random();
-    return fishColorScratch.setHSL(0.22 + r * 0.04, 0.25, 0.55 + r * 0.06).clone();
-  }
-  if (roll < 0.85) {
-    // rosy pink salmon (25%). Hue 0.98 + a little wraps past 1.0, so we take
-    // the remainder (% 1) to keep it a valid hue near red.
-    const r = Math.random();
-    return fishColorScratch.setHSL((0.98 + r * 0.02) % 1, 0.55, 0.7 + r * 0.06).clone();
-  }
-  // red spawning sockeye (15%)
-  const r = Math.random();
-  return fishColorScratch.setHSL(0.0 + r * 0.02, 0.75, 0.5 + r * 0.05).clone();
-}
 
 function getAxisBoundaryPush(coordinate, halfExtent) {
   const distanceIntoZone = Math.abs(coordinate) - (halfExtent - boundaryMargin);
@@ -336,9 +306,10 @@ export function createFlock(count, tankSize) {
     // Average of two randoms piles up near 0.5 (a "triangle" distribution),
     // so most fish are medium sized and very small / very big ones are rarer.
     const sizeRoll = (Math.random() + Math.random()) * 0.5;
-    scales[i] = 0.55 + sizeRoll * 0.95; // 0.55 .. 1.5
-    const color = randomFishColor();
-    mesh.setColorAt(i, color);
+    scales[i] = 0.75 + sizeRoll * 0.5; // 0.75 .. 1.25
+    // Colours are painted per fish inside fish.js now (koi varieties read from
+    // the aKoiBase / aKoiPatch / aKoiParams instance attributes), so there is
+    // no per-instance colour call here any more.
     orientationFromVelocity(
       orientations,
       i,
@@ -360,9 +331,6 @@ export function createFlock(count, tankSize) {
     );
   }
   mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) {
-    mesh.instanceColor.needsUpdate = true;
-  }
 
   // Step 5.4: invisible "predator" wanders near the tank center so scatter is not
   // a perfect radial burst from (0,0,0). Fish steer away when fleeWeight > 0.

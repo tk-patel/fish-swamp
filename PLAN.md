@@ -362,6 +362,11 @@ Each step has: **Goal**, **Learn**, **Tasks**, **Done when** (what you see in th
 ### 8.4 Mood tuning for the new pond
 - Silence: fish wander on their own but stay loosely together. Calm/hum: tight school. Chaos: scatter. Learn: how anchor weights shape behaviour.
 
+## PHASE 9 — Watercolour koi pond (reference: koi-pond-fishes.jpg)
+
+### 9.1 Watercolour koi pond
+- Painted water floor (domain-warped noise, pigment edges, paper grain, drifting light), koi with per-fish variety patterns (kohaku, sanke, tancho, ogon, orange) and see-through flowing fins, soft floor shadows offset by height, lily pads + lotus flowers in edge clusters, ripple rings around shallow fish. ~22 koi. Learn: procedural patterns in shaders, faking shadows, sharing instance buffers between meshes.
+
 ---
 
 ## Step template for the agent's reply

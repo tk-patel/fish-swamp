@@ -21,7 +21,10 @@ import {
   updateSmoothedAudioMood,
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
-import { applyPondFog, applyWaterGradientBackground, computePondSizeFromCamera } from './pond.js';
+import { computePondSizeFromCamera, pondWaterDepth } from './pond.js';
+import { createWaterFloor, createWaterSurface } from './water.js';
+import { createFishShadows } from './shadows.js';
+import { createLilies } from './lilies.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -33,9 +36,7 @@ import GUI from 'lil-gui';
 // ---------------------------------------------------------------------------
 const scene = new THREE.Scene();
 
-// Step 7.1 / 8.1 — bright turquoise gradient + light fog (see pond.js).
-applyWaterGradientBackground(scene);
-applyPondFog(scene, 0.01);
+scene.background = new THREE.Color('#0a3e54'); // only visible for a moment before the painted floor draws
 
 // ---------------------------------------------------------------------------
 // 2. CAMERA - the "eye". PerspectiveCamera behaves like a real camera or your
@@ -54,16 +55,17 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   1000,
 );
-// Step 8.1 — the camera is FIXED. It sits straight above the middle of the
-// pond at y = 34 and looks straight down, so the screen shows a top-down map
-// of the water. There are no camera controls any more: the view cannot be
-// moved or zoomed.
+// Step 8.1 / 9.1 — the camera is FIXED. It sits straight above the middle of
+// the pond at y = 22 and looks straight down, so the screen shows a top-down
+// map of the water. There are no camera controls any more: the view cannot be
+// moved or zoomed. We moved it closer than the old y = 34 because the koi are
+// bigger and fewer now — a lower camera fills the frame with fewer, larger fish.
 //
 // Straight-down note: the camera's default "up" is +Y, but a camera looking
 // down -Y cannot use "up" = +Y to decide which way is up on screen (the two
 // point along the same line). We set "up" to world -Z instead, so the top of
 // the screen is the far (+Z) end of the pond. Then lookAt locks the gaze.
-camera.position.set(0, 34, 0);
+camera.position.set(0, 22, 0);
 camera.up.set(0, 0, -1);
 camera.lookAt(0, 0, 0);
 
@@ -149,15 +151,20 @@ micEnableButton.addEventListener('click', async () => {
 //      Changing camera.aspect does nothing by itself; we must call
 //      updateProjectionMatrix() so the matrix is recalculated.
 //
-// Step 8.1 — the swim area is derived from the camera view, so a resize also
-// changes how much water is visible. After updating the aspect we recompute
-// the pond size and hand it to the flock, so the fish use exactly the screen.
+// Step 8.1 / 9.1 — the swim area is derived from the camera view, so a resize
+// also changes how much water is visible. After updating the aspect we recompute
+// the pond size ONCE and hand it to both the flock (so the fish use exactly the
+// screen) and the lilies (so the pads stay in the corners). `lilies` is created
+// later in this file, but this callback only runs on a real resize event — long
+// after module load — so the reference is safe.
 // ---------------------------------------------------------------------------
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  flock.setPondSize(computePondSizeFromCamera(camera));
+  const nextPondSize = computePondSizeFromCamera(camera);
+  flock.setPondSize(nextPondSize);
+  lilies.layout(nextPondSize);
 });
 
 // ---------------------------------------------------------------------------
@@ -192,8 +199,9 @@ scene.add(sunLight);
 // ---------------------------------------------------------------------------
 // FISH SCHOOL (steps 3.1–3.3) — InstancedMesh + typed-array flock in flock.js
 // ---------------------------------------------------------------------------
-// Step 4.7: try ?fish=300, ?fish=600, ?fish=1000 and watch FPS (O(n²) neighbor loops).
-const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 160;
+// Step 9.1 — 20–25 koi keeps the pond calm and uncluttered; ?fish=N still works.
+// (Step 4.7 debug reminder: try ?fish=300, ?fish=600, ?fish=1000 and watch FPS.)
+const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 22;
 
 // ---------------------------------------------------------------------------
 // POND (phase 7, reshaped in 8.1) — a shallow column of water whose x/z size
@@ -206,6 +214,34 @@ const fishCount = Number(new URLSearchParams(window.location.search).get('fish')
 const pondSize = computePondSizeFromCamera(camera);
 const flock = createFlock(fishCount, pondSize);
 scene.add(flock.mesh);
+
+// ---------------------------------------------------------------------------
+// POND LAYERS (phase 9) — the watercolour look. We stack a few flat pieces at
+// different heights so the camera (looking straight down) sees them layered:
+// the painted floor is deepest, the koi and their shadows sit in between, the
+// ripple surface and the lily pads float on top. Each module returns its own
+// mesh plus an update() function we call every frame.
+// ---------------------------------------------------------------------------
+const pondFloorY = -pondWaterDepth;
+// The flock keeps fish 1.5 units away from the surface and the floor
+// (verticalBoundaryMargin in flock.js), so this is the real swim range.
+const swimTopY = -1.5;
+const swimBottomY = pondFloorY + 1.5;
+
+const waterFloor = createWaterFloor(pondFloorY);
+scene.add(waterFloor.mesh);
+
+// The fish shadows share the koi's own instance buffers, so one call here
+// keeps every shadow glued under its fish (see shadows.js).
+const fishShadows = createFishShadows(flock.mesh, fishCount, pondFloorY);
+scene.add(fishShadows.mesh);
+
+const waterSurface = createWaterSurface(0, swimTopY, swimBottomY);
+scene.add(waterSurface.mesh);
+
+const lilies = createLilies(pondFloorY);
+scene.add(lilies.group);
+lilies.layout(pondSize);
 
 // ---------------------------------------------------------------------------
 // PERFORMANCE READOUT (step 2.3) - a small text box in the bottom-left corner.
@@ -427,6 +463,11 @@ let secondsSinceStatsUpdate = 0;
 const timer = new THREE.Timer();
 timer.connect(document);
 
+// Step 9.1 — a running clock in SECONDS SINCE LOAD. The water, shadows and
+// lily animations all want "how long has the page been up?", not the per-frame
+// delta, so we accumulate deltaSeconds into this one number and pass it around.
+let elapsedSeconds = 0;
+
 // ---------------------------------------------------------------------------
 // RENDER LOOP - a movie is many still pictures shown quickly. Each pass of
 // this function draws one picture ("frame").
@@ -447,6 +488,12 @@ function animate() {
   // Always move things as `speed (units per second) * deltaSeconds`
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
+  elapsedSeconds += deltaSeconds;
+
+  // Painted floor + lilies are pure decoration: they only need the running
+  // clock (drifting light, bobbing flowers), so we tick them right here.
+  waterFloor.update(elapsedSeconds);
+  lilies.update(elapsedSeconds);
 
   if (isMicrophoneAnalysisReady()) {
     const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
@@ -494,6 +541,11 @@ function animate() {
   fishWaveSettings.moodSpeedMul = swimMoodToSpeedMultiplier(smoothedSwimMood.uMood);
 
   flock.update(deltaSeconds);
+  // Both read the flock's freshly-updated positions, so they run right after
+  // it: shadows slide the koi's silhouette (offset by height) onto the floor,
+  // and the surface paints ripple rings only around shallow swimmers.
+  fishShadows.update(flock);
+  waterSurface.update(elapsedSeconds, flock);
 
   // Take the picture: draw `scene` as seen by `camera`.
   renderer.render(scene, camera);

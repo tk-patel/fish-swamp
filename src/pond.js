@@ -1,7 +1,9 @@
-// pond.js — the shape of the pond + the water look (phase 7, reshaped in 8.1).
+// pond.js — the shape of the pond (phase 7, reshaped in 8.1, phase 9).
 //
-// The pond is a SHALLOW box of water seen from directly above. There is no
-// floor mesh, no rocks and no plants any more — only water. World layout:
+// The pond is a SHALLOW box of water seen from directly above. This file only
+// describes its SIZE and layout — the water LOOK (painted floor, ripples) now
+// lives in water.js, and the fish/fish-shadow/lily visuals live in their own
+// modules. World layout:
 //   y = 0                  water surface
 //   y = -pondWaterDepth    bottom of the swim column
 //   x: -width/2 .. +width/2     z: -length/2 .. +length/2
@@ -48,40 +50,4 @@ export function computePondSizeFromCamera(camera) {
   const halfVisibleWidth = halfVisibleLength * camera.aspect;
 
   return new THREE.Vector3(2 * halfVisibleWidth, pondWaterDepth, 2 * halfVisibleLength);
-}
-
-// Fog color = the color the far water fades into. The background gradient
-// ends in the same color so the horizon blends instead of showing a seam.
-const fogColor = new THREE.Color(0x1fa8bf);
-
-/**
- * Vertical gradient behind the scene: brighter at the top (sunlit shallow
- * water), settling into the fog color lower down.
- * A CanvasTexture is just a 2D drawing (here: a gradient) used as an image.
- */
-export function applyWaterGradientBackground(scene) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 4; // only the vertical direction changes, so 4px wide is plenty
-  canvas.height = 256;
-  const context = canvas.getContext('2d');
-  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, '#8ff0e6');
-  gradient.addColorStop(0.5, '#3fd0d4');
-  gradient.addColorStop(1, '#1fa8bf');
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  scene.background = texture;
-  return texture;
-}
-
-/**
- * Light murk. FogExp2 blends things toward fogColor the farther they are:
- * factor = 1 - exp(-(density * distance)^2). Low density = clear shallow water.
- */
-export function applyPondFog(scene, density = 0.01) {
-  scene.fog = new THREE.FogExp2(fogColor, density);
-  return scene.fog;
 }

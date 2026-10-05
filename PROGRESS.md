@@ -84,6 +84,9 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 8.3 Salmon instead of koi
 - [x] 8.4 Mood tuning for the new pond
 
+### Phase 9 — Watercolour koi pond
+- [x] 9.1 Watercolour koi pond
+
 ## Log
 (One entry per finished step: `step X.Y — what changed — commit hash — anything surprising`)
 
@@ -138,6 +141,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 8.2 — all debug UI (lil-gui, stats, audio meters) hidden by default; C toggles via setControlsVisible(); fading "press C" hint
 - step 8.3 — salmon: longer slim compressed body (nose 1.35 .. tail -2.3), pointed snout, adipose fin, moderate fork, countershading + speckles + silvery side band, metalness 0.25; salmon palette; skewed sizes 0.55–1.5; wavelength 3.8
 - step 8.4 — mood anchors: silence cohesion 0.75 / perception 9 / wander 1.1 (loose group); calm cohesion 1.9 / alignment 1.8 / perception 13 (one school); chaos unchanged
+- step 9.1 — watercolour koi pond: water.js (painted floor + ripple surface), shadows.js (fish + disc shadows), lilies.js (pads + lotus), fish.js rewritten as koi (body + fin InstancedMesh sharing instanceMatrix, variety patterns in the fragment shader); camera y=22, 22 fish, scales 0.75–1.25, boundaryMargin 4; gradient background + fog removed
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.

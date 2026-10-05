@@ -1,8 +1,7 @@
-// fish.js - builds the fish.
+// fish.js - builds the koi (phase 9; replaces the salmon of step 8.3).
 //
-// UNITS: 1 world unit is about half a fish body length, so our fish is
-// roughly 3.65 units long from nose to tail tip (nose at z = +1.35, tail tip
-// at z = -2.3). (The pond is tens of units across, so that is believable.)
+// UNITS: a koi is about 4.6 units long at scale 1 (nose at z = +1.5, tail
+// tip at about z = -3.1). The flock scales each fish 0.75x .. 1.25x.
 //
 // ===========================================================================
 // FORWARD DIRECTION CONVENTION  (decided in step 1.3 - never change this!)
@@ -12,564 +11,642 @@
 //     +Y = UP      (the back of the fish; the belly is -Y)
 //     +X = the fish's LEFT side (-X is its right side)
 //
-//   Why is +X the fish's left? Standing at +Z and looking at the origin,
-//   +X is on YOUR right. A fish facing +Z is facing TOWARDS you, so its
-//   left is on your right. (Face a friend: your right hand is on their
-//   left.) The fish is symmetric, so this rarely matters, but it explains
-//   what you will see in the axes helper.
-//
-//   Why +Z? Because Object3D.lookAt(target) rotates an object so that its
-//   local +Z axis points at the target (for non-camera objects). With +Z as
-//   the nose, `fish.lookAt(somewhere)` makes the fish face `somewhere`
-//   with no extra rotation maths. Velocity-based steering (steps 1.4-1.6)
-//   and the instanced flock (phase 3) all depend on this one decision.
-//
-//   The geometry below follows it: the nose tip is at z = +1.35 and the tail
-//   tip is at z = -2.3.
+//   Object3D.lookAt(target) turns an object so its local +Z faces the
+//   target, so with the nose on +Z, "face where you swim" needs no extra
+//   rotation maths. The flock (flock.js) depends on this.
 // ===========================================================================
+//
+// DESIGNED FOR A CAMERA LOOKING STRAIGHT DOWN (step 8.1). We only ever see
+// the koi from above, like the reference painting, so:
+//   - the body's TOP-DOWN outline (its width) matters most: round head,
+//     broad shoulders, long taper to a narrow tail stalk;
+//   - the long "butterfly koi" fins and tail are laid out nearly FLAT
+//     (horizontal). On a real fish the tail is upright, but from above an
+//     upright tail is just a thin line. Flat fins read as the flowing white
+//     veils you see in the painting.
+//
+// TWO MESHES PER KOI, BOTH INSTANCED (one draw call each):
+//   1. BODY  - opaque. Its colour pattern (white + red patches, gold, ...)
+//              is painted by the fragment shader per fish (see KOI VARIETIES).
+//   2. FINS  - see-through white veils (tail, pectoral, pelvic, dorsal).
+//              Transparent things must be drawn separately from opaque ones,
+//              hence a second mesh. It SHARES the body's instanceMatrix, so
+//              flock.js only moves the body and the fins follow for free.
 
 import * as THREE from 'three';
-// mergeGeometries lives in the addons folder (like OrbitControls).
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------------------------------------------------------------------------
-// STEP 2.4: THE SINGLE-MESH FISH
-//
-// Until now a fish was a Group of 4 meshes (body, tail, 2 eyes) = 4 draw
-// calls per fish (see step 2.3). To draw hundreds of fish with one draw call
-// (InstancedMesh, phase 3) every fish must be ONE mesh made of ONE geometry.
-// So we build a custom BufferGeometry: the body and the tail fin are the
-// same continuous surface, just shaped differently along the Z axis.
-//
-// WHAT IS A BufferGeometry?  Just a few big lists of numbers (typed arrays):
-//   position - for every VERTEX (corner point): x, y, z
-//   color    - for every vertex: r, g, b   (we add this one ourselves)
-//   normal   - for every vertex: which way the surface faces (used by
-//              lighting; we let Three.js compute it)
-//   index    - a list of triples "vertex 5, vertex 9, vertex 12 form a
-//              triangle", so vertices can be shared between triangles.
-//
-// HOW WE BUILD THE SHAPE: think of a loaf of bread sliced along Z. Each slice
-// ("ring") is an ellipse, with a width (X) and a height (Y). If we choose the
-// ellipse size for every slice, we have chosen the whole shape:
-//
-//    nose z=+1.35                                 tail tip z=-2.3
-//      .-~~~~~-.______                            |\
-//     (  body   )_____ ) ~~ thin "neck" ~~~~~~~~~~| |  <- fin: tall but very
-//      '-.___.-'                                  |/        thin from the side
-//
-//   z from +1.35 to -0.85 : a long ellipsoid (a stretched step-1.1 egg)
-//   z from -0.85 to -1.55 : squeezes down to a thin "tail stalk" (narrowest)
-//   z from -1.55 to -2.3  : flares up in height into a flat vertical fin
+// BODY SHAPE
 // ---------------------------------------------------------------------------
+export const KOI_NOSE_Z = 1.5;
+export const KOI_STALK_Z = -1.65; // narrow "wrist" where the tail fin starts
+const KOI_WIDEST_T = 0.32; // widest point, as a fraction from nose (0) to stalk (1)
+const KOI_MAX_HALF_WIDTH = 0.46; // sideways (x) - what we see from above
+const KOI_MAX_HALF_HEIGHT = 0.4; // up/down (y)
+const KOI_STALK_FRACTION = 0.15; // stalk is 15% as thick as the shoulders
 
-// ---------------------------------------------------------------------------
-// STEP 7.6: A BETTER FISH — still ONE mesh, now built from several parts
-// STEP 8.3: reshaped from a koi into a SALMON (long, slim, compressed)
-//
-// WHY NOT A GLB FILE?  The plan suggested loading a low-poly .glb model with
-// GLTFLoader. That needs a model file, and we have no art asset in the project.
-// So instead of one hand-made file, we build the fish in code and MERGE every
-// part into a single BufferGeometry. The result behaves like a loaded model
-// would: one geometry, one material, drawn with InstancedMesh, with the same
-// vertex-shader wiggle. (If you later get a .glb, only createFishGeometry()
-// needs to be swapped for `gltf.scene...geometry`.)
-//
-// The parts (all merged into one mesh):
-//   body        - the ring-by-ring shape from step 2.4, now a long salmon body
-//                 ending at the tail stalk, painted with a pale belly, a
-//                 silvery band along the side, a darker speckled back and a
-//                 slightly darker snout
-//   tail fin    - a flat fin with a MODERATE fork (two lobes, small notch)
-//   dorsal fin  - the sail on the middle of the back
-//   adipose fin - the tiny fleshy flap salmon and trout have before the tail
-//   pectoral fins - two small side fins ("arms") tucked under the front body
-//   eyes        - two tiny near-black spheres
-//
-// LATERALLY COMPRESSED: a real salmon is taller than it is wide (flattened
-// from the sides), so getHalfSizeAtZ() returns a halfHeight bigger than its
-// halfWidth. That is what makes the fish read as slim from the top-down pond
-// camera, which mostly sees the fish's back.
-//
-// COLOR TRICK: the vertex colors below are mostly GREY (brightness only).
-// Each fish also has an instance color (set in flock.js: silvery blue, olive,
-// rosy pink or sockeye red). The GPU MULTIPLIES the two, so grey patterns come
-// out as "the fish's own color, darker here and paler there". One mesh, many
-// looks.
-// ---------------------------------------------------------------------------
+const TAIL_ROOT_Z = -1.45; // the tail fin starts a bit inside the stalk (no gap)
+const TAIL_LENGTH = 1.65;
+export const KOI_TAIL_TIP_Z = TAIL_ROOT_Z - TAIL_LENGTH; // = -3.1
 
-const NOSE_Z = 1.35;
-const BODY_END_Z = -0.85; // where the salmon body starts to narrow
-const STALK_Z = -1.55; // the narrowest point; the body mesh ends here
-const TAIL_TIP_Z = -2.3; // the very back of the tail fin
+const RINGS = 48; // slices along the body
+const SIDES = 18; // points around each slice
 
-const RINGS = 44; // how many slices along Z (more slices = smoother long body)
-const SIDES = 16; // how many points around each slice
-
-// smoothstep(t): turns a straight 0..1 ramp into an S-curve that starts and
-// ends gently (slope 0 at both ends). Great for blending shapes together
-// without a visible crease. Formula: 3t^2 - 2t^3.
 function smoothstep01(t) {
+  // 3t^2 - 2t^3: an S-curve from 0 to 1 that starts and ends gently.
   return t * t * (3 - 2 * t);
-}
-
-// lerp(a, b, t) = "linear interpolation": a when t = 0, b when t = 1, and a
-// proportional mix in between. (Used again for steering and moods later.)
-function lerp(a, b, t) {
-  return a + (b - a) * t;
 }
 
 function clamp01(value) {
   return Math.min(Math.max(value, 0), 1);
 }
 
-// The body shape: for a given z, how wide (x) and how tall (y) is the half-ellipse?
-// Returns the HALF width and HALF height (distance from the center line).
-// STEP 8.3: this is the SALMON profile — long, slim and flattened from the sides.
-function getHalfSizeAtZ(z) {
-  if (z >= BODY_END_Z) {
-    // Normalise z by the nose position. u = 1 AT the nose, u = 0 at the widest
-    // point (z = 0) and negative toward the tail. Working with the fraction u
-    // instead of the raw z keeps the maths the same however long the fish is.
-    const u = z / NOSE_Z;
-    // sqrt(1 - u^2) is the classic ellipse: 1 in the middle, falling to 0 at
-    // the nose. On its own that gives a round, blunt nose.
-    const roundness = Math.sqrt(Math.max(0, 1 - u * u));
-
-    // POINTED SNOUT: raising roundness to a power bigger than 1 makes it fall
-    // off faster near the nose (roundness -> 0 sooner), turning the blunt ball
-    // into a cone-ish snout. The exponent grows from 0.75 at the middle to
-    // 1.35 at the nose (0.75 + 0.6 * 1), so only the front sharpens up.
-    const snoutTaper = Math.pow(roundness, 0.75 + 0.6 * clamp01(u));
-
-    // halfWidth < halfHeight => taller than it is wide, i.e. LATERALLY
-    // COMPRESSED, exactly like a real salmon seen from above.
-    return { halfWidth: 0.22 * snoutTaper, halfHeight: 0.34 * snoutTaper };
-  }
-
-  // Body -> narrow stalk (the "wrist" the tail fin attaches to). We start from
-  // the SAME tapered value the body branch has at z = BODY_END_Z so the two
-  // branches join with no step, then smoothstep-blend down to the thin stalk.
-  const bodyEndU = BODY_END_Z / NOSE_Z;
-  const bodyEndRoundness = Math.sqrt(Math.max(0, 1 - bodyEndU * bodyEndU));
-  const bodyEndTaper = Math.pow(bodyEndRoundness, 0.75 + 0.6 * clamp01(bodyEndU));
-  const t = smoothstep01((BODY_END_Z - z) / (BODY_END_Z - STALK_Z));
-  return {
-    halfWidth: lerp(0.22 * bodyEndTaper, 0.045, t),
-    halfHeight: lerp(0.34 * bodyEndTaper, 0.09, t),
-  };
+function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
 /**
- * Grey brightness (0..1) for one point on the body. `angle` goes around the
- * ring: sin(angle) = +1 on the back, -1 on the belly, 0 on the sides.
- * STEP 8.3: salmon colouring — countershading, a silvery side band, dark
- * speckles on the upper half and a darker snout.
+ * Body thickness profile: 0 at the nose, 1 at the shoulders, 0.15 at the stalk.
+ * t = 0 at the nose .. 1 at the tail stalk.
  */
-function getBodyBrightness(angle, z) {
-  const backAmount = clamp01(Math.sin(angle) * 0.5 + 0.5); // 0 belly .. 1 back
-
-  // COUNTERSHADING: pale (silvery) belly, darker back. pow(backAmount, 1.2)
-  // pushes the darkening up toward the top, so the flanks stay bright and only
-  // the true back goes dark — the way a real salmon fades into the water
-  // below and stands out against it from above.
-  let brightness = lerp(1.0, 0.62, Math.pow(backAmount, 1.2));
-
-  // LATERAL LINE: a slightly brighter silvery band along each side. sin(angle)
-  // is +-1 on the back/belly and 0 on the sides, so (1 - |sin(angle)|) is 1 at
-  // the sides and 0 top/bottom. We increase brightness there.
-  const sideAmount = 1 - Math.abs(Math.sin(angle));
-  brightness *= 1 + 0.12 * sideAmount;
-  brightness = Math.min(brightness, 1.0); // never brighter than "full" white
-
-  // SPECKLES: salmon have small dark spots on the upper half. Two sine waves
-  // (one running along the body in z, one wrapping around in angle) multiply;
-  // only where both are high (> 0.55) do we darken a small patch. Multiplying
-  // by backAmount keeps the spots off the pale belly.
-  const speckle = Math.sin(z * 23.0) * Math.sin(angle * 9.0 + z * 7.0);
-  const speckleAmount = smoothstep01(clamp01((speckle - 0.55) / 0.25)) * backAmount;
-  brightness *= 1 - 0.45 * speckleAmount;
-
-  // A slightly darker snout so the face reads at a distance. The ramp runs from
-  // z = NOSE_Z - 0.4 (start of the darkening) to the nose at z = NOSE_Z.
-  brightness *= lerp(1.0, 0.85, clamp01((z - (NOSE_Z - 0.4)) / 0.4));
-  return brightness;
+function koiProfile(t) {
+  if (t < KOI_WIDEST_T) {
+    // HEAD: a quarter ellipse. sqrt(1 - (1-k)^2) rises steeply at the very
+    // front and flattens toward the shoulders = a blunt, rounded koi head
+    // (not the pointy snout of the salmon).
+    const k = t / KOI_WIDEST_T;
+    return Math.sqrt(1 - (1 - k) * (1 - k));
+  }
+  // BODY -> STALK: pow(k, 1.4) stays close to 0 for a while, so the body
+  // keeps its fullness through the middle and slims mostly toward the tail.
+  const k = (t - KOI_WIDEST_T) / (1 - KOI_WIDEST_T);
+  return lerp(1, KOI_STALK_FRACTION, Math.pow(k, 1.4));
 }
 
+function getHalfSizeAtZ(z) {
+  const t = clamp01((KOI_NOSE_Z - z) / (KOI_NOSE_Z - KOI_STALK_Z));
+  const profile = koiProfile(t);
+  return { halfWidth: KOI_MAX_HALF_WIDTH * profile, halfHeight: KOI_MAX_HALF_HEIGHT * profile };
+}
+
+/**
+ * Body tube + 2 eyes, merged by hand. Extra per-vertex attribute:
+ *   koiPart: 0 = body skin, 1 = eye (the shader paints eyes dark).
+ */
 function createBodyGeometry() {
-  const vertexCount = (RINGS + 1) * SIDES;
-  const positions = new Float32Array(vertexCount * 3); // x, y, z per vertex
-  const colors = new Float32Array(vertexCount * 3); // r, g, b per vertex
+  const positions = [];
+  const parts = [];
+  const indices = [];
 
   for (let ring = 0; ring <= RINGS; ring++) {
-    // ring 0 is at the nose, the last ring at the tail stalk.
-    const z = lerp(NOSE_Z, STALK_Z, ring / RINGS);
+    const z = lerp(KOI_NOSE_Z, KOI_STALK_Z, ring / RINGS);
     let { halfWidth, halfHeight } = getHalfSizeAtZ(z);
-
-    // The very last ring has zero width: its left and right sides meet in a
-    // line, which CLOSES the back of the body (the tail fin covers that line).
     if (ring === RINGS) {
+      // The last ring gets zero width: its sides meet in an upright line that
+      // closes the tube (the tail fin covers it). The nose ring is already a
+      // point because koiProfile(0) = 0.
       halfWidth = 0;
     }
-
     for (let side = 0; side < SIDES; side++) {
-      // A point on the ellipse: angle goes once around (0..2*PI radians);
-      // cos gives the x direction, sin the y direction; multiplying by the
-      // half width/height stretches the circle into an ellipse.
+      // A point on an ellipse: cos -> sideways, sin -> up/down.
       const angle = (side / SIDES) * Math.PI * 2;
-      const vertexIndex = ring * SIDES + side;
-      const brightness = getBodyBrightness(angle, z);
-
-      positions[vertexIndex * 3 + 0] = Math.cos(angle) * halfWidth; // x
-      positions[vertexIndex * 3 + 1] = Math.sin(angle) * halfHeight; // y
-      positions[vertexIndex * 3 + 2] = z; // z
-
-      colors[vertexIndex * 3 + 0] = brightness;
-      colors[vertexIndex * 3 + 1] = brightness;
-      colors[vertexIndex * 3 + 2] = brightness;
+      // A koi is a little flatter underneath than on top: shrink the lower
+      // half (sin < 0) by 15%.
+      const belly = Math.sin(angle) < 0 ? 0.85 : 1;
+      positions.push(Math.cos(angle) * halfWidth, Math.sin(angle) * halfHeight * belly, z);
+      parts.push(0);
     }
   }
 
-  // INDICES: connect neighbouring rings into quads, each quad = 2 triangles.
-  // `(side + 1) % SIDES` wraps the last point back to the first so the ring
-  // closes up. The ORDER of the 3 corners matters: Three.js only draws the
-  // side of a triangle whose corners go counter-clockwise as you look at it,
-  // and we want that to be the OUTSIDE of the fish.
-  const indices = [];
+  // Connect neighbouring rings with 2 triangles per quad, counter-clockwise
+  // seen from outside (Three.js draws only that side by default).
   for (let ring = 0; ring < RINGS; ring++) {
     for (let side = 0; side < SIDES; side++) {
       const nextSide = (side + 1) % SIDES;
-      const a = ring * SIDES + side; //             this ring, this point
-      const b = ring * SIDES + nextSide; //         this ring, next point around
-      const c = (ring + 1) * SIDES + side; //       next ring, this point
-      const d = (ring + 1) * SIDES + nextSide; //   next ring, next point around
-      indices.push(a, c, b);
-      indices.push(b, c, d);
+      const a = ring * SIDES + side;
+      const b = ring * SIDES + nextSide;
+      const c = (ring + 1) * SIDES + side;
+      const d = (ring + 1) * SIDES + nextSide;
+      indices.push(a, c, b, b, c, d);
     }
   }
 
+  // EYES: small spheres half-sunk into each side of the head. We copy the
+  // sphere's points into our own arrays so body + eyes stay ONE geometry.
+  for (const sideSign of [1, -1]) {
+    const eye = new THREE.SphereGeometry(0.075, 10, 8);
+    eye.translate(sideSign * 0.32, 0.12, 1.12);
+    const firstIndex = positions.length / 3;
+    const eyePositions = eye.attributes.position.array;
+    for (let i = 0; i < eyePositions.length; i++) {
+      positions.push(eyePositions[i]);
+    }
+    for (let i = 0; i < eye.attributes.position.count; i++) {
+      parts.push(1);
+    }
+    const eyeIndices = eye.index.array;
+    for (let i = 0; i < eyeIndices.length; i++) {
+      indices.push(firstIndex + eyeIndices[i]);
+    }
+    eye.dispose();
+  }
+
   const geometry = new THREE.BufferGeometry();
-  // The 3 means "3 numbers per vertex" (so the list is read in groups of 3).
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('koiPart', new THREE.Float32BufferAttribute(parts, 1));
   geometry.setIndex(indices);
-  // Works out each vertex's normal (the direction it faces) by averaging the
-  // triangles that touch it. Lighting needs this to shade the surface.
   geometry.computeVertexNormals();
   return geometry;
 }
 
-/**
- * A flat fin made from a few hand-placed points.
- * @param {number[][]} points      [x, y, z] corners of the fin
- * @param {number[][]} triangles   triples of indices into `points`
- * @param {number[]} brightnesses  grey brightness per point (fins fade toward the edge)
- */
-function createFinGeometry(points, triangles, brightnesses) {
-  const positions = new Float32Array(points.length * 3);
-  const colors = new Float32Array(points.length * 3);
-  points.forEach((point, index) => {
-    positions.set(point, index * 3);
-    colors.fill(brightnesses[index], index * 3, index * 3 + 3);
+// ---------------------------------------------------------------------------
+// FINS - each fin is a small GRID of points (rows along its length, columns
+// across), not just a few triangles, so the vertex shader can bend it into
+// smooth flowing curves. Every vertex remembers where it sits on its fin:
+//   aFinInfo = (u, v, kind, side)
+//     u    = across the fin, -1 .. +1
+//     v    = from the root (0, attached to the body) to the free edge (1)
+//     kind = 0 tail, 1 pectoral, 2 pelvic, 3 dorsal
+//     side = +1 left fin, -1 right fin, 0 for the middle fins
+// ---------------------------------------------------------------------------
+const FIN_KIND_TAIL = 0;
+const FIN_KIND_PECTORAL = 1;
+const FIN_KIND_PELVIC = 2;
+const FIN_KIND_DORSAL = 3;
+
+/** Builds one fin from a function placing (u, v) in fish space. */
+function addFinGrid(target, columns, rows, kind, side, placePoint) {
+  const firstIndex = target.positions.length / 3;
+  for (let row = 0; row <= rows; row++) {
+    const v = row / rows;
+    for (let column = 0; column <= columns; column++) {
+      const u = (column / columns) * 2 - 1;
+      const point = placePoint(u, v);
+      target.positions.push(point.x, point.y, point.z);
+      target.finInfo.push(u, v, kind, side);
+    }
+  }
+  const rowLength = columns + 1;
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const a = firstIndex + row * rowLength + column;
+      const b = a + 1;
+      const c = a + rowLength;
+      const d = c + 1;
+      target.indices.push(a, c, b, b, c, d);
+    }
+  }
+}
+
+function createFinGeometry() {
+  const target = { positions: [], finInfo: [], indices: [] };
+  const point = new THREE.Vector3();
+
+  // TAIL: a wide flat fan. halfSpread grows from the narrow root to the full
+  // width (smoothstep = soft flare). The trailing edge is a shallow "V": the
+  // middle (u = 0) is 80% as long as the outer lobes (|u| = 1), which gives
+  // the two flowing tail lobes of the painting.
+  addFinGrid(target, 10, 12, FIN_KIND_TAIL, 0, (u, v) => {
+    const halfSpread = 0.1 + 0.9 * smoothstep01(clamp01(v / 0.7));
+    const lobeLength = 0.8 + 0.2 * Math.pow(Math.abs(u), 0.8);
+    // Lobe tips curl slightly inward so the outline is rounded, not square.
+    const tipCurl = 1 - 0.18 * v * v * Math.abs(u);
+    return point.set(u * halfSpread * tipCurl, 0.02 - 0.1 * v, TAIL_ROOT_Z - v * TAIL_LENGTH * lobeLength);
+  });
+
+  // PECTORAL FINS: the big "wings" behind the head of a butterfly koi. Each
+  // grows from a root on the side of the body, outward and backward. Their
+  // width bulges in the middle (a sine hump) and rounds off at the tip.
+  for (const side of [1, -1]) {
+    const root = new THREE.Vector3(side * 0.3, -0.12, 0.55);
+    const outward = new THREE.Vector3(side * 0.78, -0.1, -0.62).normalize();
+    // "across" = outward turned 90 degrees in the flat x/z plane.
+    const across = new THREE.Vector3(-outward.z, 0, outward.x).multiplyScalar(side);
+    addFinGrid(target, 6, 8, FIN_KIND_PECTORAL, side, (u, v) => {
+      const halfWidth = 0.3 * Math.pow(Math.sin(Math.PI * (0.15 + 0.8 * v)), 0.6);
+      point.copy(root).addScaledVector(outward, 1.0 * v).addScaledVector(across, u * halfWidth);
+      point.y -= 0.1 * v * v; // the tip droops a little, like a soft veil
+      return point;
+    });
+  }
+
+  // PELVIC FINS: a smaller pair further back under the belly.
+  for (const side of [1, -1]) {
+    const root = new THREE.Vector3(side * 0.2, -0.22, -0.4);
+    const outward = new THREE.Vector3(side * 0.55, -0.15, -0.82).normalize();
+    const across = new THREE.Vector3(-outward.z, 0, outward.x).multiplyScalar(side);
+    addFinGrid(target, 4, 6, FIN_KIND_PELVIC, side, (u, v) => {
+      const halfWidth = 0.17 * Math.pow(Math.sin(Math.PI * (0.15 + 0.8 * v)), 0.6);
+      return point.copy(root).addScaledVector(outward, 0.6 * v).addScaledVector(across, u * halfWidth);
+    });
+  }
+
+  // DORSAL FIN: an upright veil along the back. From straight above it shows
+  // as a soft pale ridge line, which is exactly how the painting draws it.
+  // Here u runs along the back (-1 front .. +1 rear) and v goes upward.
+  addFinGrid(target, 12, 3, FIN_KIND_DORSAL, 0, (u, v) => {
+    const along = (u + 1) * 0.5; // 0 front .. 1 rear
+    const z = lerp(0.35, -1.0, along);
+    const backTop = getHalfSizeAtZ(z).halfHeight - 0.04;
+    const finHeight = 0.32 * Math.sin(Math.PI * (0.1 + 0.85 * along));
+    // The fin sweeps back as it rises (z shifts toward the tail with v).
+    return point.set(0, backTop + v * finHeight, z - 0.18 * v);
   });
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.setIndex(triangles.flat());
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(target.positions, 3));
+  geometry.setAttribute('aFinInfo', new THREE.Float32BufferAttribute(target.finInfo, 4));
+  geometry.setIndex(target.indices);
   geometry.computeVertexNormals();
   return geometry;
 }
 
-function createTailFinGeometry() {
-  // Looking from the side (Y up, tail pointing left, -Z):
-  //
-  //   root top ____ upper mid ___ upper tip
-  //      |                          \
-  //   center .          notch  <-----'    (the "V" cut makes the fork)
-  //      |                          /
-  //   root bottom --- lower mid --- lower tip
-  //
-  // STEP 8.3: the fork is only MODERATE now (tips ±0.5, mid ±0.3) — salmon
-  // tails are forked, but nowhere near as deep as a koi's double tail.
-  const points = [
-    [0, 0.09, STALK_Z + 0.05], // 0 root top (just ahead of the stalk)
-    [0.0, 0.3, -1.85], // 1 upper mid
-    [0.0, 0.5, TAIL_TIP_Z], // 2 upper tip
-    [0.0, 0.0, -2.05], // 3 notch (the "V" between the lobes)
-    [0.0, -0.5, TAIL_TIP_Z], // 4 lower tip
-    [0.0, -0.3, -1.85], // 5 lower mid
-    [0, -0.09, STALK_Z + 0.05], // 6 root bottom
-    [0, 0, -1.75], // 7 center (every triangle starts here: a "fan")
-  ];
-  const triangles = [
-    [7, 0, 1],
-    [7, 1, 2],
-    [7, 2, 3],
-    [7, 3, 4],
-    [7, 4, 5],
-    [7, 5, 6],
-    [7, 6, 0],
-  ];
-  // Fins are paler and softer than the body, fading toward the edge.
-  const brightnesses = [0.9, 0.75, 0.6, 0.8, 0.6, 0.75, 0.9, 0.9];
-  return createFinGeometry(points, triangles, brightnesses);
-}
-
-function createDorsalFinGeometry() {
-  // STEP 8.3: sits on the MIDDLE of the back (z ≈ 0.35 .. -0.25) instead of far
-  // back, matching where a salmon's dorsal fin actually is.
-  const points = [
-    [0, 0.3, 0.35], // 0 front base (sits slightly inside the back)
-    [0, 0.27, -0.25], // 1 back base
-    [0, 0.62, -0.12], // 2 tip
-    [0, 0.52, 0.2], // 3 front edge, halfway up
-  ];
-  const triangles = [
-    [0, 3, 2],
-    [0, 2, 1],
-  ];
-  return createFinGeometry(points, triangles, [0.85, 0.85, 0.6, 0.7]);
-}
-
-// STEP 8.3: ADIPOSE FIN — salmon and trout have this small fleshy flap with no
-// fin rays (no skeleton inside) sitting between the dorsal fin and the tail.
-// It is the quickest way to spot a salmonid, so we add one as a tiny flap.
-function createAdiposeFinGeometry() {
-  const points = [
-    [0, 0.13, -1.1], // 0 front base
-    [0, 0.1, -1.38], // 1 back base
-    [0, 0.24, -1.3], // 2 rear tip
-    [0, 0.22, -1.15], // 3 front tip
-  ];
-  const triangles = [
-    [0, 3, 2],
-    [0, 2, 1],
-  ];
-  return createFinGeometry(points, triangles, [0.7, 0.7, 0.55, 0.6]);
-}
-
-function createPectoralFinGeometry(sideSign) {
-  // sideSign = +1 for the fish's left (+X), -1 for its right.
-  // STEP 8.3: smaller and tucked under the FRONT of the slimmer body.
-  const points = [
-    [sideSign * 0.18, -0.16, 0.75], // 0 root, front
-    [sideSign * 0.2, -0.2, 0.4], // 1 root, back
-    [sideSign * 0.55, -0.34, 0.15], // 2 tip
-    [sideSign * 0.45, -0.24, 0.55], // 3 leading edge
-  ];
-  const triangles = [
-    [0, 3, 2],
-    [0, 2, 1],
-  ];
-  return createFinGeometry(points, triangles, [0.9, 0.9, 0.6, 0.75]);
-}
-
-function createEyeGeometry(sideSign) {
-  const eye = new THREE.SphereGeometry(0.06, 8, 6);
-  // SphereGeometry also stores texture coordinates (uv). Our other parts do
-  // not, and merging requires every part to have the SAME attributes.
-  eye.deleteAttribute('uv');
-  // Nearly black.
-  const eyeColors = new Float32Array(eye.attributes.position.count * 3).fill(0.04);
-  eye.setAttribute('color', new THREE.BufferAttribute(eyeColors, 3));
-  // Move it to the side of the head, partly sunk into the body.
-  // STEP 8.3: at z = 1.0 the body halfWidth is only ~0.137, and a touch less at
-  // y = 0.1 (the eye sits above the centre line), so x = 0.13 puts the eye
-  // centre right on the surface: half the little ball shows, half is inside.
-  eye.translate(sideSign * 0.13, 0.1, 1.0);
-  return eye;
-}
-
-function createFishGeometry() {
-  // mergeGeometries glues several geometries into ONE (a single vertex list),
-  // which is what lets the whole fish stay one draw call per instance batch.
-  return mergeGeometries([
-    createBodyGeometry(),
-    createTailFinGeometry(),
-    createDorsalFinGeometry(),
-    createAdiposeFinGeometry(),
-    createPectoralFinGeometry(1),
-    createPectoralFinGeometry(-1),
-    createEyeGeometry(1),
-    createEyeGeometry(-1),
-  ]);
-}
-
 // ---------------------------------------------------------------------------
-// STEP 2.5: THE SWIM WIGGLE, DONE ON THE GPU WITH A VERTEX SHADER
-//
-// WHAT IS A SHADER?  A tiny program that runs on the graphics card (GPU),
-// written in a C-like language called GLSL. For every frame, the GPU runs:
-//   - a VERTEX SHADER once for every vertex (corner point) of the mesh: it
-//     decides where on the screen that corner goes. We can nudge vertices
-//     here, which MOVES THE SHAPE.
-//   - a FRAGMENT SHADER once for every pixel covered by a triangle: it
-//     decides that pixel's color (lighting, fog, ...). We leave this alone.
-// The GPU runs thousands of these in parallel, which is why it can wiggle
-// 300 fish for almost free - the CPU never touches their vertices.
-//
-// WHY NOT JUST MOVE VERTICES IN JAVASCRIPT?  We would loop over 641 vertices
-// x 300 fish x 60 times a second and re-upload the data to the GPU. Wasteful.
-//
-// HOW DO WE ADD OUR OWN CODE?  MeshStandardMaterial already contains a big,
-// complicated shader (physically based lighting, fog, ...). Rewriting it
-// would be painful, so Three.js lets us EDIT it as text just before it is
-// compiled: `material.onBeforeCompile = (shader) => { ... }`. The shader is
-// built from named snippets like `#include <begin_vertex>` (the line that
-// creates the vertex position variable `transformed`). We find that line and
-// put our own code right after it.
-//
-// UNIFORMS: a value that is the SAME for every vertex in a draw call, set
-// from JavaScript. "Uniform" = uniform across all vertices. We keep each one
-// in an object so main.js and the sliders can change `.value` and the shader
-// sees the new number on the next frame.
+// THE SWIM WAVE (step 2.5, reshaped for the koi)
+// A travelling sine wave bends the body sideways: sin(z * k + phase), with
+// k = 2*PI / wavelength. tailWeight keeps the head still and lets the tail
+// swing most. This GLSL is shared by the body, the fins AND the shadows
+// (shadows.js), so all three bend exactly together.
 // ---------------------------------------------------------------------------
 export const fishWaveUniforms = {
-  // How far the tail tip swings sideways, in world units.
-  uAmplitude: { value: 0.35 },
-  // Distance along the body for one full S-curve. Fish are ~3.65 long, so 3.8
-  // means "about one S-curve along the whole body". Step 8.3 raised this from
-  // 3.0: a longer body gets a longer, lazier wave, the way a big salmon swims.
-  uWavelength: { value: 3.8 },
-  // Step 5.6: 0 = calm slow wag, 1 = panicked fast flap (set from mood in main.js).
-  uMood: { value: 0 },
+  uAmplitude: { value: 0.4 }, // how far the tail tip swings, world units
+  uWavelength: { value: 4.6 }, // one lazy S-curve along the whole koi
+  uMood: { value: 0 }, // 0 calm .. 1 panic (set from mood in main.js)
 };
 
-// Base wave travel speed (rad/s). Each fish also scales phase growth by its
-// swim speed (step 3.4) via the per-instance aWiggleMul attribute.
+// Base wave travel speed (rad/s). flock.js advances each fish's phase.
 export const fishWaveSettings = {
-  speed: 9.0,
-  // Multiplier on phase advance; main.js ties this to smoothed uMood.
+  speed: 7.0, // koi swim more slowly and gracefully than salmon
   moodSpeedMul: 1.0,
 };
 
-const WAVE_HEAD_Z = 1.0; // from here forward the body stays perfectly still
+const WAVE_HEAD_Z = 0.9; // in front of this the head stays perfectly still
 
-function addSwimWiggleToMaterial(material) {
+export const koiWaveGlsl = /* glsl */ `
+  uniform float uAmplitude;
+  uniform float uWavelength;
+  uniform float uMood;
+  attribute float aPhase;
+  attribute float aWiggleMul;
+
+  // 0 at the head, 1 at the tail tip (S-curve in between).
+  float koiTailWeight(float z) {
+    return 1.0 - smoothstep(${KOI_TAIL_TIP_Z.toFixed(2)}, ${WAVE_HEAD_Z.toFixed(2)}, z);
+  }
+
+  // Sideways offset of the body centre line at local z.
+  float koiBodyOffsetX(float z) {
+    float waveNumber = 6.28318530718 / uWavelength;
+    float moodAmplitude = mix(0.72, 1.55, uMood); // wider swing when panicking
+    return sin(z * waveNumber + aPhase) * uAmplitude * moodAmplitude * koiTailWeight(z) * aWiggleMul;
+  }
+`;
+
+// ---------------------------------------------------------------------------
+// KOI VARIETIES - real koi breeds, picked at random per fish. Each fish gets
+// three per-instance attributes the shaders read:
+//   aKoiBase   = main skin colour (vec3)
+//   aKoiPatch  = patch colour (vec3)
+//   aKoiParams = (seed, coverage, sumi, tancho)
+//      seed     random number: every fish gets a different patch layout
+//      coverage 0..1 how much of the back the patches cover
+//      sumi     1 = add small black "sumi" spots (Sanke koi)
+//      tancho   1 = one round red spot on the head only (Tancho koi)
+// THREE.Color('#hex') converts screen colours into the LINEAR colour space
+// the lit materials work in, so the hex values look as written.
+// ---------------------------------------------------------------------------
+const koiVarieties = [
+  // Kohaku: white with big red-orange patches (both koi in the reference).
+  { weight: 0.36, base: '#f4f0e6', patch: ['#e04a22', '#f06a2e'], coverage: [0.45, 0.65], sumi: 0, tancho: 0 },
+  // Sanke: like Kohaku plus small black spots.
+  { weight: 0.18, base: '#f4f0e6', patch: ['#e3532a', '#ee6630'], coverage: [0.38, 0.55], sumi: 1, tancho: 0 },
+  // Tancho: pure white with a single red circle on the head.
+  { weight: 0.1, base: '#f6f3ec', patch: ['#d9301c', '#e23a22'], coverage: [0, 0], sumi: 0, tancho: 1 },
+  // Yamabuki ogon: solid gold, with softly lighter patches.
+  { weight: 0.14, base: '#f0a12c', patch: ['#f8c75c', '#fad27a'], coverage: [0.3, 0.45], sumi: 0, tancho: 0 },
+  // Orange koi with white patches (the reverse of Kohaku).
+  { weight: 0.22, base: '#ec7428', patch: ['#f6f1e6', '#f3ebdc'], coverage: [0.3, 0.45], sumi: 0, tancho: 0 },
+];
+
+function pickKoiVariety() {
+  let roll = Math.random();
+  for (const variety of koiVarieties) {
+    roll -= variety.weight;
+    if (roll <= 0) {
+      return variety;
+    }
+  }
+  return koiVarieties[0];
+}
+
+// ---------------------------------------------------------------------------
+// BODY MATERIAL - MeshStandardMaterial (so the koi get real light and shade),
+// edited with onBeforeCompile (step 2.5) to:
+//   vertex:   bend with the swim wave, pass the UNBENT local position along
+//             so the pattern sticks to the skin while the body moves;
+//   fragment: replace the flat colour with the koi pattern.
+// ---------------------------------------------------------------------------
+const koiPatternGlsl = /* glsl */ `
+  // 3D value noise: like the 2D version in shaders/noise.js, but blending
+  // the 8 corners of a cube. Lets the patches wrap around the round body.
+  float koiHash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+  float koiNoise(vec3 p) {
+    vec3 cell = floor(p);
+    vec3 f = fract(p);
+    vec3 w = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(koiHash(cell), koiHash(cell + vec3(1, 0, 0)), w.x),
+          mix(koiHash(cell + vec3(0, 1, 0)), koiHash(cell + vec3(1, 1, 0)), w.x), w.y),
+      mix(mix(koiHash(cell + vec3(0, 0, 1)), koiHash(cell + vec3(1, 0, 1)), w.x),
+          mix(koiHash(cell + vec3(0, 1, 1)), koiHash(cell + vec3(1, 1, 1)), w.x), w.y),
+      w.z);
+  }
+`;
+
+function addKoiBodyShader(material) {
   material.onBeforeCompile = (shader) => {
-    // Give the shader access to our uniform objects.
-    shader.uniforms.uAmplitude = fishWaveUniforms.uAmplitude;
-    shader.uniforms.uWavelength = fishWaveUniforms.uWavelength;
-    shader.uniforms.uMood = fishWaveUniforms.uMood;
+    Object.assign(shader.uniforms, fishWaveUniforms);
 
-    // Per-instance attributes (InstancedBufferAttribute on the geometry, step 3.4).
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <common>',
-      `#include <common>
-       uniform float uAmplitude;
-       uniform float uWavelength;
-       uniform float uMood;
-       attribute float aPhase;
-       attribute float aWiggleMul;`,
-    );
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         ${koiWaveGlsl}
+         attribute float koiPart;
+         attribute vec3 aKoiBase;
+         attribute vec3 aKoiPatch;
+         attribute vec4 aKoiParams;
+         varying vec3 vKoiLocal;
+         varying float vKoiPart;
+         varying vec3 vKoiBase;
+         varying vec3 vKoiPatch;
+         varying vec4 vKoiParams;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+         // Pass the pattern inputs to the fragment shader. 'varying' values
+         // are blended across each triangle, one value per pixel.
+         vKoiLocal = position; // BEFORE bending: the pattern rides on the skin
+         vKoiPart = koiPart;
+         vKoiBase = aKoiBase;
+         vKoiPatch = aKoiPatch;
+         vKoiParams = aKoiParams;
+         transformed.x += koiBodyOffsetX(transformed.z);`,
+      );
 
-    // 2) Add the wiggle right after the vertex position is created.
-    //    (The ${...} parts below are filled in by JavaScript before the
-    //    text is sent to the GPU, turning our constants into GLSL numbers.)
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         ${koiPatternGlsl}
+         varying vec3 vKoiLocal;
+         varying float vKoiPart;
+         varying vec3 vKoiBase;
+         varying vec3 vKoiPatch;
+         varying vec4 vKoiParams;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+         vec3 p = vKoiLocal;
+         float seed = vKoiParams.x;
+         float coverage = vKoiParams.y;
 
-       // 'transformed' is this vertex's position in the fish's own local
-       // space (x = sideways, y = up, z = along the body, nose at +Z).
+         // Patches live on the back and upper sides; the belly stays the
+         // base colour (p.y < 0 is the lower half of the body).
+         float backMask = smoothstep(-0.22, 0.06, p.y);
 
-       // HOW MUCH should THIS vertex wiggle? 0 for the head, 1 at the tail
-       // tip. A real fish keeps its head fairly steady and swings its tail
-       // the most; without this weight the whole fish would just slide
-       // side to side like a snake with no head.
-       //
-       // smoothstep(edge0, edge1, x) returns 0 when x <= edge0, 1 when
-       // x >= edge1, and an S-shaped curve in between (flat at both ends).
-       // Our edges are (tail tip, head line). z is large at the nose, so
-       // smoothstep gives 1 at the head and 0 at the tail - we flip it with
-       // "1.0 - ..." to get 0 at the head and 1 at the tail.
-       // Compared with a straight ramp, the S-curve keeps the front half of
-       // the body calm and concentrates the motion in the tail, and it has
-       // no visible kink where the still part meets the moving part.
-       float tailWeight = 1.0 - smoothstep(${TAIL_TIP_Z.toFixed(2)}, ${WAVE_HEAD_Z.toFixed(2)}, transformed.z);
+         // PATCHES: two layers of noise (big blobs + a little detail).
+         // Adding seed * 17 slides each fish to a different part of the
+         // endless noise pattern = every koi has its own markings.
+         vec3 q = p * vec3(2.1, 2.1, 1.5) + seed * 17.0;
+         float patchNoise = koiNoise(q) * 0.7 + koiNoise(q * 2.3) * 0.3;
+         // Koi patches very often cover the head: nudge the noise up there.
+         patchNoise += 0.12 * smoothstep(0.5, 1.2, p.z);
+         // More coverage = lower threshold = more of the noise counts as patch.
+         float threshold = mix(0.72, 0.38, coverage);
+         // Narrow smoothstep = crisp painted edge, not a blurry gradient.
+         float patchAmount = smoothstep(threshold - 0.025, threshold + 0.025, patchNoise) * backMask;
+         patchAmount *= step(0.001, coverage); // coverage 0 = no patches at all
 
-       // A TRAVELLING SINE WAVE: sin(position * k + phase).
-       //  - z * k : different parts of the body are at different points of
-       //            the wave, so the body bends into an S-shape.
-       //            k = 2*PI / wavelength (radians of wave per unit length).
-       //            Short wavelength = many tight ripples; long = one lazy bend.
-       //  - aPhase : per-fish phase (random start, advanced on CPU each frame).
-       //  - aWiggleMul : scales wag with this fish's swim speed (0..1-ish).
-       float waveNumber = 6.28318530718 / uWavelength;
-       float wavePhase = transformed.z * waveNumber + aPhase;
+         // TANCHO: a single round spot on top of the head (distance from a
+         // point on the head, seen from above in x/z).
+         float tanchoSpot = 1.0 - smoothstep(0.2, 0.23, length(p.xz - vec2(0.0, 0.92)));
+         patchAmount = mix(patchAmount, tanchoSpot * backMask, vKoiParams.w);
 
-       // uMood (0 calm .. 1 panic): wider tail swing when the flock is chaotic.
-       float moodAmpMul = mix(0.72, 1.55, uMood);
+         vec3 koiColor = mix(vKoiBase, vKoiPatch, patchAmount);
 
-       transformed.x += sin(wavePhase) * uAmplitude * moodAmpMul * tailWeight * aWiggleMul;`,
-    );
+         // Watercolour touch: pigment darkens where a patch meets the base.
+         float patchEdge = 1.0 - abs(patchAmount * 2.0 - 1.0);
+         koiColor *= 1.0 - 0.12 * patchEdge;
+
+         // SUMI: small black spots, only on Sanke (vKoiParams.z = 1).
+         float sumiNoise = koiNoise(p * 5.5 + seed * 31.0);
+         float sumi = smoothstep(0.8, 0.83, sumiNoise) * backMask * vKoiParams.z;
+         koiColor = mix(koiColor, vec3(0.025, 0.03, 0.035), sumi);
+
+         // Faint scale shimmer: a tight diamond grid made of two sine waves.
+         float scaleGrid = sin(p.z * 34.0 + p.x * 26.0) * sin(p.z * 34.0 - p.x * 26.0);
+         koiColor *= 1.0 - 0.035 * smoothstep(0.3, 1.0, scaleGrid);
+
+         // Eyes are dark.
+         koiColor = mix(koiColor, vec3(0.02), step(0.5, vKoiPart));
+
+         diffuseColor.rgb = koiColor;`,
+      );
   };
 }
 
-// Build the geometry and material ONCE and share them between every fish.
-// Many meshes can point at the same geometry/material, so 1000 fish do not
-// need 1000 copies of the same 640 vertices. InstancedMesh (step 3.1) goes
-// further: one draw call tells the GPU "draw this mesh N times", each copy
-// at a different position/rotation stored in instanceMatrix.
-let sharedFishGeometry = null;
-let sharedFishMaterial = null;
+// ---------------------------------------------------------------------------
+// FIN MATERIAL - transparent white veils that flow and flutter.
+// ---------------------------------------------------------------------------
+function addKoiFinShader(material) {
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, fishWaveUniforms);
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         ${koiWaveGlsl}
+         attribute vec4 aFinInfo;
+         attribute vec3 aKoiBase;
+         varying vec4 vFinInfo;
+         varying vec3 vKoiBase;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+         vFinInfo = aFinInfo;
+         vKoiBase = aKoiBase;
+         float u = aFinInfo.x;
+         float v = aFinInfo.y;
+         float kind = aFinInfo.z;
+         float side = aFinInfo.w;
+
+         // 1) Every fin follows the body wave at its own z, so it stays
+         //    attached to the body while the fish swims.
+         float bodyShift = koiBodyOffsetX(transformed.z);
+
+         if (kind < 0.5) {
+           // TAIL: the same wave keeps travelling into the tail, but each row
+           // lags behind the one before it (- 1.3 * v) and swings wider (v^2).
+           // That delay is what makes a long veil look soft and flowing
+           // instead of a stiff paddle.
+           float trailing = sin(transformed.z * 6.2831853 / uWavelength + aPhase - 1.3 * v);
+           bodyShift += trailing * 0.32 * v * v * aWiggleMul * mix(0.8, 1.4, uMood);
+           // A gentle up/down ripple running across the veil.
+           transformed.y += sin(aPhase * 0.6 + u * 2.5 + v * 3.0) * 0.07 * v;
+         } else if (kind < 1.5) {
+           // PECTORAL: slow paddling. The tip moves the most (times v).
+           // side shifts the beat so left and right are not in lockstep.
+           float paddle = sin(aPhase * 0.32 + side * 1.3);
+           transformed.y += paddle * 0.2 * v;
+           transformed.z += paddle * 0.08 * v;
+         } else if (kind < 2.5) {
+           // PELVIC: small flutter.
+           transformed.y += sin(aPhase * 0.45 + side) * 0.08 * v;
+         } else {
+           // DORSAL: the top edge sways a little.
+           bodyShift += sin(aPhase * 0.8 + u * 3.0) * 0.05 * v;
+         }
+         transformed.x += bodyShift;`,
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         varying vec4 vFinInfo;
+         varying vec3 vKoiBase;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+         float u = vFinInfo.x;
+         float v = vFinInfo.y;
+
+         // Milky white veil; near the root it borrows a little of the fish's
+         // own body colour (gold koi get golden fin roots).
+         vec3 finWhite = vec3(0.93, 0.95, 0.95);
+         vec3 finColor = mix(vKoiBase, finWhite, smoothstep(0.0, 0.45, v) * 0.6 + 0.4);
+
+         // FIN RAYS: thin bony lines running from root to edge. A sine across
+         // u gives evenly spaced lines; the narrow smoothstep keeps them thin.
+         float ray = smoothstep(0.75, 1.0, sin(u * 3.14159 * 7.0));
+         finColor += 0.06 * ray;
+
+         // The free edges pick up the blue of the water (watercolour wash).
+         float edge = smoothstep(0.7, 1.0, max(v, abs(u)));
+         finColor = mix(finColor, vec3(0.55, 0.72, 0.8), 0.35 * edge);
+
+         // Thick near the body, wispy at the edge.
+         float alpha = mix(0.85, 0.3, smoothstep(0.0, 1.0, v));
+         alpha = min(1.0, alpha + 0.12 * ray);
+
+         diffuseColor = vec4(finColor, alpha);`,
+      );
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shared, built once.
+// ---------------------------------------------------------------------------
+let bodyGeometry = null;
+let finGeometry = null;
+let bodyMaterial = null;
+let finMaterial = null;
 
 function ensureSharedFishAssets() {
-  if (sharedFishGeometry !== null) {
+  if (bodyGeometry !== null) {
     return;
   }
-  sharedFishGeometry = createFishGeometry();
-  // vertexColors: true tells the material to use the 'color' attribute we
-  // painted above instead of one flat color for the whole mesh.
-  // DoubleSide: fins are paper-thin flat shapes, so both faces must be drawn.
-  // roughness 0.35 / metalness 0.25: fairly smooth and slightly metallic. Real
-  // fish scales are wet and a bit reflective, so this gives salmon that silvery
-  // sheen without turning them into mirrors.
-  sharedFishMaterial = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.35,
-    metalness: 0.25,
+  bodyGeometry = createBodyGeometry();
+  finGeometry = createFinGeometry();
+
+  // Fairly matt skin with a soft sheen (roughness 0.5, no metalness: a
+  // painting has no mirror reflections).
+  bodyMaterial = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0 });
+  addKoiBodyShader(bodyMaterial);
+
+  // transparent: blend with what is behind (the water and shadows).
+  // depthWrite false: a see-through veil must not hide the fins behind it.
+  // DoubleSide: fins are paper-thin, both faces must be drawn.
+  finMaterial = new THREE.MeshStandardMaterial({
+    roughness: 0.75,
+    metalness: 0,
+    transparent: true,
+    depthWrite: false,
     side: THREE.DoubleSide,
   });
-  addSwimWiggleToMaterial(sharedFishMaterial);
+  addKoiFinShader(finMaterial);
 }
 
 /**
- * Creates one fish and returns it as a single THREE.Mesh.
- * (Before step 2.4 this returned a Group with several meshes inside.)
- */
-export function createFish() {
-  ensureSharedFishAssets();
-  return new THREE.Mesh(sharedFishGeometry, sharedFishMaterial);
-}
-
-/**
- * Empty InstancedMesh shell — flock.js fills instanceMatrix each frame from
- * typed-array positions and quaternions (steps 3.2–3.3).
+ * Body InstancedMesh with the fin InstancedMesh attached as a child
+ * (mesh.userData.finMesh). flock.js fills the body's instanceMatrix; the fin
+ * mesh uses the very same matrix buffer, so it moves too.
  */
 export function createFishInstancedMesh(instanceCount) {
   ensureSharedFishAssets();
 
+  // Per-fish values (InstancedBufferAttribute = one value per fish, step 3.4).
   const swimPhases = new Float32Array(instanceCount);
   const wiggleMul = new Float32Array(instanceCount);
+  const koiBase = new Float32Array(instanceCount * 3);
+  const koiPatch = new Float32Array(instanceCount * 3);
+  const koiParams = new Float32Array(instanceCount * 4);
+  const scratchColor = new THREE.Color();
+
   for (let i = 0; i < instanceCount; i++) {
     swimPhases[i] = Math.random() * Math.PI * 2;
     wiggleMul[i] = 1;
+
+    const variety = pickKoiVariety();
+    scratchColor.set(variety.base).toArray(koiBase, i * 3);
+    const patchHex = variety.patch[Math.floor(Math.random() * variety.patch.length)];
+    scratchColor.set(patchHex).toArray(koiPatch, i * 3);
+    koiParams[i * 4 + 0] = Math.random() * 10; // seed
+    koiParams[i * 4 + 1] = lerp(variety.coverage[0], variety.coverage[1], Math.random());
+    koiParams[i * 4 + 2] = variety.sumi;
+    koiParams[i * 4 + 3] = variety.tancho;
   }
 
   const phaseAttr = new THREE.InstancedBufferAttribute(swimPhases, 1);
   phaseAttr.setUsage(THREE.DynamicDrawUsage);
   const wiggleAttr = new THREE.InstancedBufferAttribute(wiggleMul, 1);
   wiggleAttr.setUsage(THREE.DynamicDrawUsage);
-  sharedFishGeometry.setAttribute('aPhase', phaseAttr);
-  sharedFishGeometry.setAttribute('aWiggleMul', wiggleAttr);
+  const baseAttr = new THREE.InstancedBufferAttribute(koiBase, 3);
+  const patchAttr = new THREE.InstancedBufferAttribute(koiPatch, 3);
+  const paramsAttr = new THREE.InstancedBufferAttribute(koiParams, 4);
 
-  const mesh = new THREE.InstancedMesh(
-    sharedFishGeometry,
-    sharedFishMaterial,
-    instanceCount,
-  );
+  // The SAME attribute objects go on both geometries: one upload to the GPU,
+  // and body + fins always agree on phase and colours.
+  for (const geometry of [bodyGeometry, finGeometry]) {
+    geometry.setAttribute('aPhase', phaseAttr);
+    geometry.setAttribute('aWiggleMul', wiggleAttr);
+    geometry.setAttribute('aKoiBase', baseAttr);
+    geometry.setAttribute('aKoiPatch', patchAttr);
+    geometry.setAttribute('aKoiParams', paramsAttr);
+  }
+
+  const mesh = new THREE.InstancedMesh(bodyGeometry, bodyMaterial, instanceCount);
+  const finMesh = new THREE.InstancedMesh(finGeometry, finMaterial, instanceCount);
+  finMesh.instanceMatrix = mesh.instanceMatrix; // share the fish placements
+  finMesh.renderOrder = 1; // see-through things are drawn after opaque ones
+
+  // InstancedMesh culling uses a bounding sphere computed once; our fish move
+  // all over the pond, so skip culling (only ~25 fish, it costs nothing).
+  mesh.frustumCulled = false;
+  finMesh.frustumCulled = false;
+  mesh.add(finMesh);
+
+  mesh.userData.finMesh = finMesh;
   mesh.userData.swimPhases = swimPhases;
   mesh.userData.wiggleMul = wiggleMul;
   mesh.userData.phaseAttribute = phaseAttr;
