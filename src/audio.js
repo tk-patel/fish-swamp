@@ -31,12 +31,35 @@ let analyserNode = null;
 let timeDomainBytes = null;
 let frequencyBytes = null;
 
+// Step 6.3: one loudness number from the waveform (updated each sampleMicrophoneAnalysis).
+let latestRms = 0;
+
 export function getMicrophoneStream() {
   return microphoneStream;
 }
 
 export function isMicrophoneAnalysisReady() {
   return analyserNode !== null;
+}
+
+/** Root-mean-square loudness from the last sample (0 = silence, ~0.1+ when speaking). */
+export function getMicrophoneRms() {
+  return latestRms;
+}
+
+/**
+ * RMS = "average energy" of the waveform (not just the loudest peak).
+ * We convert each byte sample to roughly -1..1, square them, average, sqrt.
+ * That reacts smoothly to sustained sound; a single spike matters less.
+ */
+export function computeRmsFromByteTimeDomain(timeDomainBytes) {
+  let sumSquares = 0;
+  for (let i = 0; i < timeDomainBytes.length; i += 1) {
+    // 128 is the analyser's "zero" for silence in byte form.
+    const normalizedSample = (timeDomainBytes[i] - 128) / 128;
+    sumSquares += normalizedSample * normalizedSample;
+  }
+  return Math.sqrt(sumSquares / timeDomainBytes.length);
 }
 
 /**
@@ -112,6 +135,7 @@ export function sampleMicrophoneAnalysis(timeDomainOut, frequencyOut) {
 
   analyserNode.getByteTimeDomainData(timeDomainOut);
   analyserNode.getByteFrequencyData(frequencyOut);
+  latestRms = computeRmsFromByteTimeDomain(timeDomainOut);
   return true;
 }
 

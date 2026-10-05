@@ -9,6 +9,7 @@ import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
 import {
   getMicrophoneAnalysisBuffers,
+  getMicrophoneRms,
   isMicrophoneAnalysisReady,
   requestMicrophonePermission,
   sampleMicrophoneAnalysis,
@@ -296,6 +297,24 @@ statsBox.style.cssText =
 document.body.appendChild(statsBox);
 
 // ---------------------------------------------------------------------------
+// VOLUME BAR (step 6.3) — RMS loudness from the mic waveform.
+// Shown only after analysis starts; fill width tracks getMicrophoneRms().
+// ---------------------------------------------------------------------------
+const volumeMeter = document.createElement('div');
+volumeMeter.style.cssText =
+  'position:fixed;left:8px;bottom:72px;display:none;width:160px;padding:6px 8px;' +
+  'background:rgba(0,0,0,0.55);color:#cfefff;font:12px/1.4 monospace;pointer-events:none;';
+volumeMeter.innerHTML =
+  '<div style="margin-bottom:4px">volume (RMS)</div>' +
+  '<div style="height:10px;background:rgba(255,255,255,0.12);border-radius:2px;overflow:hidden">' +
+  '<div id="volume-bar-fill" style="height:100%;width:0%;background:#3db8d4;border-radius:2px"></div>' +
+  '</div>';
+document.body.appendChild(volumeMeter);
+const volumeBarFill = volumeMeter.querySelector('#volume-bar-fill');
+// Raw RMS is often ~0.01 quiet / ~0.15 loud; scale so normal speech fills most of the bar.
+const volumeBarRmsScale = 6;
+
+// ---------------------------------------------------------------------------
 // TUNING PANEL (step 2.6) - lil-gui. `gui.add(object, 'property', min, max,
 // step)` makes a slider that edits object.property live. Our shader reads the
 // uniform objects every frame, so moving a slider changes the fish instantly.
@@ -415,6 +434,9 @@ function animate() {
   if (isMicrophoneAnalysisReady()) {
     const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
     sampleMicrophoneAnalysis(timeDomain, frequency);
+    volumeMeter.style.display = 'block';
+    const barWidthPercent = Math.min(100, getMicrophoneRms() * volumeBarRmsScale * 100);
+    volumeBarFill.style.width = `${barWidthPercent}%`;
   }
 
   // Let OrbitControls apply the damping glide and move the camera.
@@ -435,30 +457,6 @@ function animate() {
       `fish:       ${fishCount}\n` +
       `draw calls: ${renderer.info.render.calls}\n` +
       `triangles:  ${renderer.info.render.triangles}`;
-
-    // Step 6.2 debug: speak and watch the console — values should rise above ~0.
-    if (isMicrophoneAnalysisReady()) {
-      const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
-      let peakFrequency = 0;
-      for (let i = 0; i < frequency.length; i += 1) {
-        if (frequency[i] > peakFrequency) {
-          peakFrequency = frequency[i];
-        }
-      }
-      let peakTimeDeviation = 0;
-      for (let i = 0; i < timeDomain.length; i += 1) {
-        const deviation = Math.abs(timeDomain[i] - 128);
-        if (deviation > peakTimeDeviation) {
-          peakTimeDeviation = deviation;
-        }
-      }
-      console.log(
-        '[audio] peak frequency byte:',
-        peakFrequency,
-        '| peak waveform deviation from silence:',
-        peakTimeDeviation,
-      );
-    }
 
     framesSinceStatsUpdate = 0;
     secondsSinceStatsUpdate = 0;
