@@ -118,7 +118,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 5.4 — jittering threat point + flee steering scaled by fleeWeight — 3258b6c
 - step 5.5 — exponential smooth on mood weights (attackRate / releaseRate) — 6b31e55
 - step 5.6 — uMood uniform + moodSpeedMul; swim phase and amplitude follow chaos — e8d954f
-- step 6.1 — mic overlay + getUserMedia (raw audio constraints); deny/skip paths; fish keep running — (commit pending)
+- step 6.1 — mic overlay + getUserMedia (raw audio constraints); deny/skip paths; fish keep running — 35f4d26
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.
