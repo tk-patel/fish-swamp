@@ -24,11 +24,7 @@ import {
   updateSmoothedAudioMood,
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
-import {
-  applyPondFog,
-  applyWaterGradientBackground,
-  computePondSizeFromCamera,
-} from './pond.js';
+import { applyPondFog, applyWaterGradientBackground, createPondSize } from './pond.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -40,9 +36,9 @@ import GUI from 'lil-gui';
 // ---------------------------------------------------------------------------
 const scene = new THREE.Scene();
 
-// Step 7.1 — gradient sky/surface behind the pond + depth fog (see pond.js).
+// Step 7.1 — gradient water behind the pond + light fog (see pond.js).
 applyWaterGradientBackground(scene);
-applyPondFog(scene, 0.028);
+applyPondFog(scene, 0.016);
 
 // ---------------------------------------------------------------------------
 // 2. CAMERA - the "eye". PerspectiveCamera behaves like a real camera or your
@@ -66,14 +62,11 @@ const camera = new THREE.PerspectiveCamera(
 // we back the camera up along +Z (towards us) and lift it a little (+Y)
 // to see all of it. OrbitControls (below) looks at the origin by default.
 //
-// TEMPORARY (step 1.1): a fish is only ~2 units long, so from the full-tank
-// view at (0, 5, 35) it would be a speck. We stay closer while we build one
-// fish. (Step 1.5: moved back and up a little to see more of the area.)
-// Top-down pond view: camera above +Y, looking at the water column (y <= 0 is underwater).
-const topViewHeight = 58;
-camera.position.set(0, topViewHeight, 0);
-camera.up.set(0, 0, -1);
-camera.lookAt(0, 0, 0);
+// Pond view: we float above the water and look down at an angle, like
+// leaning over the edge of a shallow pond. The target (0, -3, 0) is the
+// middle of the water column, so the floor and the fish are both in frame.
+camera.position.set(0, 24, 30);
+camera.lookAt(0, -3, 0);
 
 // ---------------------------------------------------------------------------
 // 3. RENDERER - the "photographer". It takes the scene + camera and paints
@@ -157,17 +150,10 @@ micEnableButton.addEventListener('click', async () => {
 //      Changing camera.aspect does nothing by itself; we must call
 //      updateProjectionMatrix() so the matrix is recalculated.
 // ---------------------------------------------------------------------------
-function updatePondBoundsFromView() {
-  const nextSize = computePondSizeFromCamera(camera);
-  pondSize.copy(nextSize);
-  flock.setPondSize(pondSize);
-}
-
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  updatePondBoundsFromView();
 });
 
 // ---------------------------------------------------------------------------
@@ -183,11 +169,11 @@ window.addEventListener('resize', () => {
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05; // smaller = longer glide
-controls.target.set(0, -4, 0);
-controls.minPolarAngle = 0.02;
-controls.maxPolarAngle = 0.28;
-controls.minDistance = 28;
-controls.maxDistance = 110;
+controls.target.set(0, -3, 0);
+controls.minPolarAngle = 0.1;
+controls.maxPolarAngle = 1.35; // stop just before the camera drops to water level
+controls.minDistance = 14;
+controls.maxDistance = 75;
 controls.enablePan = true;
 
 // ---------------------------------------------------------------------------
@@ -209,12 +195,12 @@ controls.enablePan = true;
 //    shapes feel 3D. We keep it soft (low intensity, slightly blue-white)
 //    since light is scattered underwater.
 // ---------------------------------------------------------------------------
-const skyColor = 0x9fe6ff; // light from above
-const groundColor = 0x06232c; // light bounced up from the deep
-const hemisphereLight = new THREE.HemisphereLight(skyColor, groundColor, 1.2);
+const skyColor = 0xcff3ff; // light from above
+const groundColor = 0x3a5a48; // light bounced up from the sandy, plant-green floor
+const hemisphereLight = new THREE.HemisphereLight(skyColor, groundColor, 1.5);
 scene.add(hemisphereLight);
 
-const sunLight = new THREE.DirectionalLight(0xcfefff, 1.35);
+const sunLight = new THREE.DirectionalLight(0xfff6e0, 2.0);
 sunLight.position.set(8, 50, 12);
 scene.add(sunLight);
 
@@ -222,25 +208,16 @@ scene.add(sunLight);
 // FISH SCHOOL (steps 3.1–3.3) — InstancedMesh + typed-array flock in flock.js
 // ---------------------------------------------------------------------------
 // Step 4.7: try ?fish=300, ?fish=600, ?fish=1000 and watch FPS (O(n²) neighbor loops).
-const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 300;
+const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 160;
 
 // ---------------------------------------------------------------------------
-// POND (phase 7) — swim area matches the camera view on the water plane (y = 0).
-// Soft boundaries (step 1.8) turn fish inward near the invisible banks.
+// POND (phase 7) — a fixed, shallow box of water (see pond.js).
+// Soft boundaries (step 1.8) turn fish back near the invisible banks, the
+// surface and the floor.
 // ---------------------------------------------------------------------------
-const pondSize = computePondSizeFromCamera(camera);
+const pondSize = createPondSize();
 const flock = createFlock(fishCount, pondSize);
 scene.add(flock.mesh);
-scene.add(flock.perceptionSphereDebug);
-updatePondBoundsFromView();
-
-// Step 4.1 debug: N cycles which fish is highlighted (magenta) and tints neighbors cyan.
-window.addEventListener('keydown', (event) => {
-  if (event.key === 'n' || event.key === 'N') {
-    flock.cycleWatchFish();
-    console.log(`watching fish #${flock.watchFishIndex()}, neighbors: ${flock.neighborCount()}`);
-  }
-});
 
 // ---------------------------------------------------------------------------
 // PERFORMANCE READOUT (step 2.3) - a small text box in the bottom-left corner.
@@ -433,8 +410,6 @@ function animate() {
   // Always move things as `speed (units per second) * deltaSeconds`
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
-
-  updatePondBoundsFromView();
 
   if (isMicrophoneAnalysisReady()) {
     const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();

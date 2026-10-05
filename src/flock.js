@@ -12,9 +12,13 @@
 
 import * as THREE from 'three';
 import { createFishInstancedMesh, fishWaveSettings } from './fish.js';
-import { getDepth01, getDepthColorMultiplier, getDepthScale } from './pond.js';
 
-const boundaryMargin = 5;
+const boundaryMargin = 5; // sideways: start turning back 5 units from the bank
+// Up/down: the pond is only ~6 deep, so the soft zone at the surface and floor is smaller.
+const verticalBoundaryMargin = 1.5;
+// Shallow water: fish mostly cruise sideways. Each second vertical speed is
+// multiplied by exp(-verticalDamping), so steep dives fade out quickly.
+const verticalDamping = 1.2;
 const boundaryWeight = 30;
 const wanderDistance = 4;
 const wanderRadius = 2;
@@ -117,9 +121,10 @@ function getAxisBoundaryPush(coordinate, halfExtent) {
 function randomInPond(positions, index, pondSize) {
   positions[index * 3 + 0] = (Math.random() - 0.5) * pondSize.x;
   positions[index * 3 + 2] = (Math.random() - 0.5) * pondSize.z;
-  // y = 0 is the surface; negative y is deeper underwater.
-  const depthFraction = Math.pow(Math.random(), 0.85);
-  positions[index * 3 + 1] = -depthFraction * pondSize.y;
+  // y = 0 is the surface. Start between just under it and just above the floor.
+  const swimTopY = -verticalBoundaryMargin * 0.5;
+  const swimBottomY = -pondSize.y + verticalBoundaryMargin;
+  positions[index * 3 + 1] = swimBottomY + Math.random() * (swimTopY - swimBottomY);
 }
 
 function randomUnitVelocity(velocities, index) {
@@ -128,7 +133,8 @@ function randomUnitVelocity(velocities, index) {
   const phi = Math.acos(2 * Math.random() - 1);
   const speed = flockSettings.maxSpeed * (0.4 + Math.random() * 0.6);
   velocities[index * 3 + 0] = Math.sin(phi) * Math.cos(theta) * speed;
-  velocities[index * 3 + 1] = Math.sin(phi) * Math.sin(theta) * speed;
+  // * 0.3: start mostly horizontal (shallow pond).
+  velocities[index * 3 + 1] = Math.sin(phi) * Math.sin(theta) * speed * 0.3;
   velocities[index * 3 + 2] = Math.cos(phi) * speed;
 }
 
@@ -251,34 +257,6 @@ function enforceSpeedLimits() {
   velocity.clampLength(minSpeed, maxSpeed);
 }
 
-function setInstanceColorFromBase(mesh, index, baseColors, py, pondColumnDepth) {
-  const ci = index * 3;
-  fishColorScratch.setRGB(baseColors[ci], baseColors[ci + 1], baseColors[ci + 2]);
-  const depth01 = getDepth01(py, pondColumnDepth);
-  fishColorScratch.multiplyScalar(getDepthColorMultiplier(depth01));
-  mesh.setColorAt(index, fishColorScratch);
-}
-
-function applyNeighborDebugColors(
-  mesh,
-  baseColors,
-  positions,
-  watchIndex,
-  neighborIndices,
-  neighborCount,
-  pondColumnDepth,
-) {
-  for (let i = 0; i < mesh.count; i++) {
-    setInstanceColorFromBase(mesh, i, baseColors, positions[i * 3 + 1], pondColumnDepth);
-  }
-  mesh.setColorAt(watchIndex, fishColorScratch.setHex(0xff66ff));
-  fishColorScratch.setHex(0x66ffcc);
-  for (let n = 0; n < neighborCount; n++) {
-    mesh.setColorAt(neighborIndices[n], fishColorScratch);
-  }
-  mesh.instanceColor.needsUpdate = true;
-}
-
 function writeInstanceMatrix(mesh, index, px, py, pz, orientations, scale) {
   fishQuaternion.fromArray(orientations, index * 4);
   instancePlacement.position.set(px, py, pz);
@@ -293,12 +271,12 @@ function writeInstanceMatrix(mesh, index, px, py, pz, orientations, scale) {
  * @param {THREE.Vector3} tankSize — full width, height, depth
  */
 function getDepthBoundaryPush(y, surfaceY, bottomY) {
-  if (y > surfaceY - boundaryMargin) {
-    const intoAir = (y - (surfaceY - boundaryMargin)) / boundaryMargin;
+  if (y > surfaceY - verticalBoundaryMargin) {
+    const intoAir = (y - (surfaceY - verticalBoundaryMargin)) / verticalBoundaryMargin;
     return -Math.min(Math.max(intoAir, 0), 1);
   }
-  if (y < bottomY + boundaryMargin) {
-    const intoFloor = (bottomY + boundaryMargin - y) / boundaryMargin;
+  if (y < bottomY + verticalBoundaryMargin) {
+    const intoFloor = (bottomY + verticalBoundaryMargin - y) / verticalBoundaryMargin;
     return Math.min(Math.max(intoFloor, 0), 1);
   }
   return 0;
@@ -308,13 +286,11 @@ export function createFlock(count, tankSize) {
   const pondHalfSize = new THREE.Vector3();
   let pondSurfaceY = 0;
   let pondBottomY = -tankSize.y;
-  let pondColumnDepth = tankSize.y;
 
   pondHalfSize.set(tankSize.x * 0.5, 0, tankSize.z * 0.5);
 
   function setPondSize(nextPondSize) {
     pondHalfSize.set(nextPondSize.x * 0.5, 0, nextPondSize.z * 0.5);
-    pondColumnDepth = nextPondSize.y;
     pondSurfaceY = 0;
     pondBottomY = -nextPondSize.y;
   }
@@ -325,7 +301,6 @@ export function createFlock(count, tankSize) {
   const orientations = new Float32Array(count * 4);
   const wanderOffsets = new Float32Array(count * 3);
   const scales = new Float32Array(count);
-  const baseColors = new Float32Array(count * 3);
   const neighborScratch = new Int32Array(count);
   const swimPhases = mesh.userData.swimPhases;
   const wiggleMul = mesh.userData.wiggleMul;
@@ -339,9 +314,6 @@ export function createFlock(count, tankSize) {
     scales[i] = 0.7 + Math.random() * 0.6;
     const color = randomFishColor();
     mesh.setColorAt(i, color);
-    baseColors[i * 3] = color.r;
-    baseColors[i * 3 + 1] = color.g;
-    baseColors[i * 3 + 2] = color.b;
     orientationFromVelocity(
       orientations,
       i,
@@ -367,19 +339,6 @@ export function createFlock(count, tankSize) {
     mesh.instanceColor.needsUpdate = true;
   }
 
-  // TEMPORARY debug (step 4.1): wire sphere = perception radius around watched fish.
-  const perceptionSphereDebug = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 24, 16),
-    new THREE.MeshBasicMaterial({
-      color: 0x66ccff,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.35,
-    }),
-  );
-
-  let watchFishIndex = 0;
-
   // Step 5.4: invisible "predator" wanders near the tank center so scatter is not
   // a perfect radial burst from (0,0,0). Fish steer away when fleeWeight > 0.
   const threatPoint = new THREE.Vector3(
@@ -400,10 +359,6 @@ export function createFlock(count, tankSize) {
     if (distSq > maxDistSq) {
       threatPoint.multiplyScalar(threatJitterRadius / Math.sqrt(distSq));
     }
-  }
-
-  function cycleWatchFish() {
-    watchFishIndex = (watchFishIndex + 1) % count;
   }
 
   function update(deltaSeconds) {
@@ -486,6 +441,8 @@ export function createFlock(count, tankSize) {
       steeringForce.clampLength(0, flockSettings.maxSteeringForce);
 
       velocity.addScaledVector(steeringForce, deltaSeconds);
+      // Calm the up/down part of the velocity so the school stays in a flat sheet.
+      velocity.y *= Math.exp(-verticalDamping * deltaSeconds);
       enforceSpeedLimits();
       velocities[pi] = velocity.x;
       velocities[pi + 1] = velocity.y;
@@ -514,45 +471,16 @@ export function createFlock(count, tankSize) {
       fishQuaternion.slerp(targetQuaternion, turnBlend);
       fishQuaternion.toArray(orientations, i * 4);
 
-      const depth01 = getDepth01(position.y, pondColumnDepth);
-      const depthScale = getDepthScale(depth01);
-      writeInstanceMatrix(
-        mesh,
-        i,
-        position.x,
-        position.y,
-        position.z,
-        orientations,
-        scales[i] * depthScale,
-      );
-      setInstanceColorFromBase(mesh, i, baseColors, position.y, pondColumnDepth);
+      writeInstanceMatrix(mesh, i, position.x, position.y, position.z, orientations, scales[i]);
     }
 
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.instanceColor.needsUpdate = true;
     phaseAttribute.needsUpdate = true;
     wiggleAttribute.needsUpdate = true;
-
-    const neighborCount = findNeighbors(watchFishIndex, positions, count, neighborScratch);
-    applyNeighborDebugColors(
-      mesh,
-      baseColors,
-      positions,
-      watchFishIndex,
-      neighborScratch,
-      neighborCount,
-      pondColumnDepth,
-    );
-
-    const wi = watchFishIndex * 3;
-    perceptionSphereDebug.position.set(positions[wi], positions[wi + 1], positions[wi + 2]);
-    const pr = flockSettings.perceptionRadius;
-    perceptionSphereDebug.scale.set(pr, pr, pr);
   }
 
   return {
     mesh,
-    perceptionSphereDebug,
     positions,
     velocities,
     orientations,
@@ -560,10 +488,6 @@ export function createFlock(count, tankSize) {
     scales,
     swimPhases,
     setPondSize,
-    watchFishIndex: () => watchFishIndex,
-    neighborCount: () =>
-      findNeighbors(watchFishIndex, positions, count, neighborScratch),
-    cycleWatchFish,
     update,
   };
 }

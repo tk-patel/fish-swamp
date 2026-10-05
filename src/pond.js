@@ -1,129 +1,58 @@
-// pond.js — visible viewport as the swim area + water look (phase 7.1).
+// pond.js — the shape of the pond + the water look (phase 7).
+//
+// The pond is a SHALLOW box of water. World layout (units):
+//   y = 0                  water surface
+//   y = -pondWaterDepth    pond floor (sand, rocks and plants live here, step 7.2)
+//   x: -pondWidth/2 .. +pondWidth/2     z: -pondLength/2 .. +pondLength/2
+//
+// Earlier (first 7.1 attempt) the swim area was recomputed from the camera
+// every frame. That made the pond "breathe" whenever you orbited, and a deep
+// column looked dark and empty from above. A fixed, shallow box is simpler
+// and lets us SEE the floor through the water.
 
 import * as THREE from 'three';
 
-/** Water column depth below the surface (y = 0). Fish swim from 0 down to -pondWaterHeight. */
-export const pondWaterHeight = 14;
+export const pondWidth = 46; // x
+export const pondLength = 30; // z
+export const pondWaterDepth = 6; // y — shallow: you can see the bottom
 
-const pondPlaneY = 0;
-const frustumCornerNdc = [
-  [-1, -1],
-  [1, -1],
-  [-1, 1],
-  [1, 1],
-];
-
-const rayOrigin = new THREE.Vector3();
-const rayDirection = new THREE.Vector3();
-const unprojectPoint = new THREE.Vector3();
-
-/**
- * Where a screen corner's view ray hits the horizontal pond surface (y = pondPlaneY).
- * Returns null if the ray does not hit (camera parallel to the water).
- */
-function intersectViewRayWithPondPlane(camera, ndcX, ndcY) {
-  unprojectPoint.set(ndcX, ndcY, 0.5);
-  unprojectPoint.unproject(camera);
-  rayDirection.copy(unprojectPoint).sub(camera.position).normalize();
-  rayOrigin.copy(camera.position);
-
-  if (Math.abs(rayDirection.y) < 1e-5) {
-    return null;
-  }
-
-  const travelDistance = (pondPlaneY - rayOrigin.y) / rayDirection.y;
-  if (travelDistance <= 0) {
-    return null;
-  }
-
-  return rayOrigin.clone().addScaledVector(rayDirection, travelDistance);
+/** Full pond size as a Vector3 (x = width, y = depth, z = length) for the flock. */
+export function createPondSize() {
+  return new THREE.Vector3(pondWidth, pondWaterDepth, pondLength);
 }
 
-/**
- * Pond width/depth = frustum footprint on the water plane (× margin).
- * Resizes with window aspect and camera zoom (call each frame or on resize).
- */
-export function computePondSizeFromCamera(camera, margin = 0.88) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  let hitCount = 0;
-
-  for (const [ndcX, ndcY] of frustumCornerNdc) {
-    const hit = intersectViewRayWithPondPlane(camera, ndcX, ndcY);
-    if (!hit) {
-      continue;
-    }
-    hitCount += 1;
-    minX = Math.min(minX, hit.x);
-    maxX = Math.max(maxX, hit.x);
-    minZ = Math.min(minZ, hit.z);
-    maxZ = Math.max(maxZ, hit.z);
-  }
-
-  if (hitCount < 4) {
-    const aspect = camera.aspect || 1;
-    const fallbackDepth = 28;
-    return new THREE.Vector3(fallbackDepth * aspect, pondWaterHeight, fallbackDepth);
-  }
-
-  const width = Math.max((maxX - minX) * margin, 8);
-  const depth = Math.max((maxZ - minZ) * margin, 8);
-  return new THREE.Vector3(width, pondWaterHeight, depth);
-}
-
-const fogDeepColor = new THREE.Color(0x062a35);
+// Fog color = the color the far water fades into. The background gradient
+// ends in the same color so the horizon blends instead of showing a seam.
+const fogColor = new THREE.Color(0x2b8596);
 
 /**
- * Radial gradient for top-down view: lighter center (open water), darker at edges.
+ * Vertical gradient behind the scene: brighter at the top (light coming from
+ * the surface), settling into the fog color lower down.
+ * A CanvasTexture is just a 2D drawing (here: a gradient) used as an image.
  */
 export function applyWaterGradientBackground(scene) {
   const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
+  canvas.width = 4; // only the vertical direction changes, so 4px wide is plenty
+  canvas.height = 256;
   const context = canvas.getContext('2d');
-  const gradient = context.createRadialGradient(256, 256, 24, 256, 256, 280);
-  gradient.addColorStop(0, '#5ecbe6');
-  gradient.addColorStop(0.45, '#2f9db5');
-  gradient.addColorStop(0.78, '#1a6f82');
-  gradient.addColorStop(1, '#062a35');
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, '#6fd0e0');
+  gradient.addColorStop(0.5, '#3d9fb2');
+  gradient.addColorStop(1, '#2b8596');
   context.fillStyle = gradient;
   context.fillRect(0, 0, canvas.width, canvas.height);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.magFilter = THREE.LinearFilter;
-  texture.minFilter = THREE.LinearFilter;
   scene.background = texture;
-
   return texture;
 }
 
-/** Murk that matches the deep end of the gradient so fish fade into the water. */
-export function applyPondFog(scene, density = 0.022) {
-  scene.fog = new THREE.FogExp2(fogDeepColor, density);
+/**
+ * Light murk. FogExp2 blends things toward fogColor the farther they are:
+ * factor = 1 - exp(-(density * distance)^2). Low density = clear shallow water.
+ */
+export function applyPondFog(scene, density = 0.016) {
+  scene.fog = new THREE.FogExp2(fogColor, density);
   return scene.fog;
-}
-
-export function getPondFogColor() {
-  return fogDeepColor;
-}
-
-/** 0 at surface (y = 0), 1 at pond bottom (y = -pondDepth). */
-export function getDepth01(y, pondDepth = pondWaterHeight) {
-  if (pondDepth <= 0) {
-    return 0;
-  }
-  return Math.min(1, Math.max(0, -y / pondDepth));
-}
-
-/** Smaller fish when deeper (top-down camera + manual scale for readability). */
-export function getDepthScale(depth01) {
-  return 1 - depth01 * 0.52;
-}
-
-/** Darken instance color when deeper (murk + fog read). */
-export function getDepthColorMultiplier(depth01) {
-  return 0.28 + (1 - depth01) * 0.72;
 }
