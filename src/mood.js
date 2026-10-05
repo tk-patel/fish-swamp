@@ -4,8 +4,6 @@
 // in flock.js never touches a microphone — it only reads flockSettings weights.
 // That keeps input (sound) separate from behavior (boids).
 
-import { flockPresets } from './flock.js';
-
 /**
  * Live inputs: lil-gui sliders (step 5.2) and later the microphone (phase 6).
  * Both are 0..1.
@@ -15,7 +13,7 @@ export const moodState = {
   chaos: 0,
 };
 
-/** Keyboard / GUI targets for step 5.2 (step 5.3 will refine the mapping). */
+/** Keyboard / GUI targets (step 5.2). */
 export const moodPresets = {
   silence: { energy: 0, chaos: 0 },
   calm: { energy: 1, chaos: 0 },
@@ -36,13 +34,55 @@ function clamp01(value) {
   return Math.min(1, Math.max(0, value));
 }
 
-// Linear interpolation: at t=0 return a, at t=1 return b (same idea as step 1.6 slerp, but for numbers).
+// Linear blend between two numbers (introduced in step 1.6 for quaternions; same idea here).
 function lerpNumber(a, b, t) {
   return a + (b - a) * t;
 }
 
-/** Blend two preset objects field-by-field (same keys as flockPresets.*). */
-function lerpPresetWeights(from, to, t) {
+// smoothstep: like lerp but eases in/out at the ends (S-curve). Avoids harsh "snaps"
+// when energy or chaos cross small threshold values on the sliders.
+function smoothstep01(t) {
+  const x = clamp01(t);
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * Step 5.3 behavior table — three anchor moods, not the raw flock GUI presets.
+ *   silence: high wander, low school forces
+ *   calm:    strong alignment + cohesion, moderate separation and speed
+ *   chaos:   weak cohesion, strong separation, faster swim, flee (wired in step 5.4)
+ */
+const moodAnchors = {
+  silence: {
+    wanderWeight: 1.35,
+    separationWeight: 1.0,
+    alignmentWeight: 0.35,
+    cohesionWeight: 0.3,
+    maxSpeed: 2.0,
+    perceptionRadius: 6.5,
+    fleeWeight: 0,
+  },
+  calm: {
+    wanderWeight: 0.45,
+    separationWeight: 1.15,
+    alignmentWeight: 1.55,
+    cohesionWeight: 1.65,
+    maxSpeed: 2.45,
+    perceptionRadius: 10,
+    fleeWeight: 0,
+  },
+  chaos: {
+    wanderWeight: 1.45,
+    separationWeight: 2.65,
+    alignmentWeight: 0.12,
+    cohesionWeight: 0.04,
+    maxSpeed: 3.35,
+    perceptionRadius: 6,
+    fleeWeight: 1.25,
+  },
+};
+
+function lerpAnchorWeights(from, to, t) {
   return {
     wanderWeight: lerpNumber(from.wanderWeight, to.wanderWeight, t),
     separationWeight: lerpNumber(from.separationWeight, to.separationWeight, t),
@@ -50,21 +90,22 @@ function lerpPresetWeights(from, to, t) {
     cohesionWeight: lerpNumber(from.cohesionWeight, to.cohesionWeight, t),
     maxSpeed: lerpNumber(from.maxSpeed, to.maxSpeed, t),
     perceptionRadius: lerpNumber(from.perceptionRadius, to.perceptionRadius, t),
+    fleeWeight: lerpNumber(from.fleeWeight, to.fleeWeight, t),
   };
 }
 
 /**
- * Pure function: mood -> boid weights (no side effects, no flock mutation).
- * Step 5.3 will replace this simple blend with the full silence/calm/chaos table.
+ * Pure function: mood -> boid tuning (no side effects).
  *
- * @param {number} energy 0 ≈ idle wander, 1 ≈ tight schooling (when chaos is low)
- * @param {number} chaos 0 = smooth, 1 ≈ scatter preset
+ * @param {number} energy 0 = quiet / silence anchor, 1 = lively / calm schooling
+ * @param {number} chaos 0 = smooth, 1 = panicked / chaos anchor
  */
 export function moodToFlockWeights(energy, chaos) {
-  const e = clamp01(energy);
-  const c = clamp01(chaos);
+  const e = smoothstep01(energy);
+  const c = smoothstep01(chaos);
 
-  // Rising energy morphs idle → tight school; rising chaos pulls toward scatter.
-  const calmSide = lerpPresetWeights(flockPresets.idle, flockPresets.tightSchool, e);
-  return lerpPresetWeights(calmSide, flockPresets.scatter, c);
+  // Rising energy morphs silence → calm while chaos stays low.
+  const quietToCalm = lerpAnchorWeights(moodAnchors.silence, moodAnchors.calm, e);
+  // Rising chaos pulls whatever we have toward the chaos anchor (scatter + flee).
+  return lerpAnchorWeights(quietToCalm, moodAnchors.chaos, c);
 }

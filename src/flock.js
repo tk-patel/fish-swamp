@@ -65,6 +65,7 @@ export const flockSettings = {
   cohesionWeight: 0.75,
   wanderWeight: 1.0,
   perceptionRadius: 8,
+  fleeWeight: 0, // step 5.3 mapping; step 5.4 applies flee steering from this
 };
 
 function getPerceptionRadiusSq() {
