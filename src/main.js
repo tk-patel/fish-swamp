@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
+import { requestMicrophonePermission } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
@@ -90,6 +91,53 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 // The renderer created its own <canvas> element; we put it in the page.
 document.querySelector('#app').appendChild(renderer.domElement);
+
+// ---------------------------------------------------------------------------
+// MICROPHONE START SCREEN (step 6.1)
+// The 3D scene runs immediately; this overlay sits on top until the user
+// clicks. Only a click counts as a "user gesture" for getUserMedia.
+// ---------------------------------------------------------------------------
+const micOverlay = document.querySelector('#mic-overlay');
+const micEnableButton = document.querySelector('#mic-enable-btn');
+const micSkipButton = document.querySelector('#mic-skip-btn');
+const micMessage = document.querySelector('#mic-message');
+
+function hideMicOverlay() {
+  micOverlay.classList.add('is-hidden');
+}
+
+function showMicError(friendlyText) {
+  micMessage.textContent = friendlyText;
+}
+
+micSkipButton.addEventListener('click', () => {
+  hideMicOverlay();
+});
+
+micEnableButton.addEventListener('click', async () => {
+  micEnableButton.disabled = true;
+  micMessage.textContent = '';
+
+  const result = await requestMicrophonePermission();
+
+  if (result.granted) {
+    hideMicOverlay();
+    // Step 6.2 will connect this stream to an AudioContext and AnalyserNode.
+    return;
+  }
+
+  micEnableButton.disabled = false;
+  const err = result.error;
+  if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+    showMicError(
+      'Microphone access was blocked. You can allow it in the browser address bar and try again, or continue without the mic — the fish will keep swimming.',
+    );
+  } else if (err?.name === 'NotFoundError') {
+    showMicError('No microphone was found on this device. Continue without the mic or plug one in and try again.');
+  } else {
+    showMicError(err?.message ?? 'Could not open the microphone. Try again or continue without it.');
+  }
+});
 
 // ---------------------------------------------------------------------------
 // RESIZE - when the window changes size we must update TWO things:

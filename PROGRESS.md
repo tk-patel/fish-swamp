@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 6.1 (next up) — Phase 5 complete
-**Last updated:** 2026-10-04 (finished 5.6)
+**Current step:** 6.2 (next up) — finished 6.1
+**Last updated:** 2026-10-04 (finished 6.1)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -57,7 +57,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 5.6 Swim animation follows mood
 
 ### Phase 6 — Microphone
-- [ ] 6.1 Start screen and permission
+- [x] 6.1 Start screen and permission
 - [ ] 6.2 AudioContext and AnalyserNode
 - [ ] 6.3 Volume (RMS)
 - [ ] 6.4 Noise-floor calibration
@@ -118,6 +118,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 5.4 — jittering threat point + flee steering scaled by fleeWeight — 3258b6c
 - step 5.5 — exponential smooth on mood weights (attackRate / releaseRate) — 6b31e55
 - step 5.6 — uMood uniform + moodSpeedMul; swim phase and amplitude follow chaos — e8d954f
+- step 6.1 — mic overlay + getUserMedia (raw audio constraints); deny/skip paths; fish keep running — (commit pending)
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.

@@ -14,10 +14,102 @@
         overflow: hidden;
         background: #06202b;
       }
+
+      /* Step 6.1 — full-screen gate until the user enables the mic (or skips). */
+      #mic-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        box-sizing: border-box;
+        background: rgba(6, 32, 43, 0.92);
+        color: #cfefff;
+        font-family: system-ui, -apple-system, sans-serif;
+        text-align: center;
+      }
+
+      #mic-overlay.is-hidden {
+        display: none;
+      }
+
+      #mic-overlay .mic-card {
+        max-width: 420px;
+      }
+
+      #mic-overlay h1 {
+        margin: 0 0 12px;
+        font-size: 1.5rem;
+        font-weight: 600;
+      }
+
+      #mic-overlay p {
+        margin: 0 0 20px;
+        line-height: 1.5;
+        opacity: 0.9;
+      }
+
+      #mic-overlay .mic-message {
+        margin: 16px 0 0;
+        min-height: 1.25em;
+        color: #ffb4a8;
+        font-size: 0.95rem;
+      }
+
+      #mic-overlay button {
+        display: block;
+        width: 100%;
+        margin: 8px 0 0;
+        padding: 12px 16px;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+
+      #mic-enable-btn {
+        background: #3db8d4;
+        color: #06202b;
+        font-weight: 600;
+      }
+
+      #mic-enable-btn:hover {
+        background: #5cc8e0;
+      }
+
+      #mic-enable-btn:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
+      #mic-skip-btn {
+        background: transparent;
+        color: #9fe6ff;
+        border: 1px solid rgba(159, 230, 255, 0.35);
+      }
+
+      #mic-skip-btn:hover {
+        background: rgba(159, 230, 255, 0.08);
+      }
     </style>
   </head>
   <body>
-    <!-- Later steps will put the Three.js <canvas> in here. -->
+    <!-- Step 6.1 — user gesture required before getUserMedia. -->
+    <div id="mic-overlay" role="dialog" aria-labelledby="mic-overlay-title">
+      <div class="mic-card">
+        <h1 id="mic-overlay-title">Fish Swamp</h1>
+        <p>
+          The school reacts to sound from your microphone. Enable it when you are ready — you can
+          still watch the fish wander if you skip.
+        </p>
+        <button type="button" id="mic-enable-btn">Enable microphone</button>
+        <button type="button" id="mic-skip-btn">Continue without microphone</button>
+        <p id="mic-message" class="mic-message" aria-live="polite"></p>
+      </div>
+    </div>
+
     <div id="app"></div>
 
     <!-- type="module" lets us use import/export. Vite serves and bundles it. -->
