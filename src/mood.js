@@ -109,3 +109,38 @@ export function moodToFlockWeights(energy, chaos) {
   // Rising chaos pulls whatever we have toward the chaos anchor (scatter + flee).
   return lerpAnchorWeights(quietToCalm, moodAnchors.chaos, c);
 }
+
+/** Fields mood writes into flockSettings (also smoothed in step 5.5). */
+export const moodFlockWeightKeys = [
+  'wanderWeight',
+  'separationWeight',
+  'alignmentWeight',
+  'cohesionWeight',
+  'maxSpeed',
+  'perceptionRadius',
+  'fleeWeight',
+];
+
+// Step 5.5: fast attack when chaos rises, slower release when calming down.
+export const moodWeightSmoothing = {
+  attackRate: 14,
+  releaseRate: 2.2,
+};
+
+const initialSmoothedWeights = moodToFlockWeights(0, 0);
+export const smoothedFlockWeights = { ...initialSmoothedWeights };
+
+/**
+ * Ease current smoothed weights toward the target from moodToFlockWeights.
+ * Uses separate rise/fall rates so scatter hits quickly but recovery is gradual.
+ */
+export function updateSmoothedFlockWeights(targetWeights, deltaSeconds) {
+  for (const key of moodFlockWeightKeys) {
+    const current = smoothedFlockWeights[key];
+    const target = targetWeights[key];
+    const rate =
+      target > current ? moodWeightSmoothing.attackRate : moodWeightSmoothing.releaseRate;
+    const blend = 1 - Math.exp(-rate * deltaSeconds);
+    smoothedFlockWeights[key] = current + (target - current) * blend;
+  }
+}

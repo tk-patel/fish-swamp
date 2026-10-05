@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 5.4 (next up) — step 5.3 done
-**Last updated:** 2026-10-04 (finished 5.3)
+**Current step:** 5.6 (next up) — steps 5.4–5.5 done
+**Last updated:** 2026-10-04 (finished 5.5)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -53,7 +53,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 5.2 Fake input (sliders/keys)
 - [x] 5.3 Mapping design (silence / calm / chaos)
 - [x] 5.4 Flee force
-- [ ] 5.5 Smoothing transitions
+- [x] 5.5 Smoothing transitions
 - [ ] 5.6 Swim animation follows mood
 
 ### Phase 6 — Microphone
@@ -115,7 +115,8 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 5.1 — `src/mood.js`: moodState { energy, chaos } + pure moodToFlockWeights(); main applies each frame — a5d9879
 - step 5.2 — Mood lil-gui folder + keys 1/2/3 and moodPresets silence/calm/chaos — d20dbd6
 - step 5.3 — moodAnchors table + smoothstep blends; fleeWeight on flockSettings (used in 5.4) — 7c67ebc
-- step 5.4 — jittering threat point + flee steering scaled by fleeWeight — (commit pending)
+- step 5.4 — jittering threat point + flee steering scaled by fleeWeight — 3258b6c
+- step 5.5 — exponential smooth on mood weights (attackRate / releaseRate) — 6b31e55
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.
