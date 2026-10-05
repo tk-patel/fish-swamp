@@ -280,7 +280,11 @@ function writeInstanceMatrix(mesh, index, px, py, pz, orientations, scale) {
  * @param {THREE.Vector3} tankSize — full width, height, depth
  */
 export function createFlock(count, tankSize) {
-  const tankHalfSize = tankSize.clone().multiplyScalar(0.5);
+  const pondHalfSize = tankSize.clone().multiplyScalar(0.5);
+
+  function setPondSize(nextPondSize) {
+    pondHalfSize.copy(nextPondSize).multiplyScalar(0.5);
+  }
   const mesh = createFishInstancedMesh(count);
 
   const positions = new Float32Array(count * 3);
@@ -441,9 +445,9 @@ export function createFlock(count, tankSize) {
       }
 
       boundaryForce.set(
-        getAxisBoundaryPush(px, tankHalfSize.x),
-        getAxisBoundaryPush(py, tankHalfSize.y),
-        getAxisBoundaryPush(pz, tankHalfSize.z),
+        getAxisBoundaryPush(px, pondHalfSize.x),
+        getAxisBoundaryPush(py, pondHalfSize.y),
+        getAxisBoundaryPush(pz, pondHalfSize.z),
       );
       steeringForce.addScaledVector(boundaryForce, boundaryWeight);
       steeringForce.clampLength(0, flockSettings.maxSteeringForce);
@@ -502,6 +506,7 @@ export function createFlock(count, tankSize) {
     wanderOffsets,
     scales,
     swimPhases,
+    setPondSize,
     watchFishIndex: () => watchFishIndex,
     neighborCount: () =>
       findNeighbors(watchFishIndex, positions, count, neighborScratch),

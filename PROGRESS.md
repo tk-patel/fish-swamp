@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 7.x (optional polish) — Phase 6 complete
-**Last updated:** 2026-10-04 (finished 6.10)
+**Current step:** 7.2+ (optional polish) — finished 7.1
+**Last updated:** 2026-10-04 (finished 7.1)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -69,7 +69,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 6.10 Tuning session
 
 ### Phase 7 — Polish (optional)
-- [ ] 7.1 Gradient water and fog
+- [x] 7.1 Gradient water and fog
 - [ ] 7.2 Floor, rocks, plants
 - [ ] 7.3 Light rays / caustics
 - [ ] 7.4 Camera drift
@@ -123,6 +123,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 6.3 — RMS from time-domain bytes; on-screen volume bar — 87fbcf7
 - step 6.4 — 1 s noise floor + normalize to 0..1; R to recalibrate — 8640241
 - step 6.5–6.10 — volatility/flux bars, energy+chaos, smooth + mic→mood, tuning constants — 39aa60a
+- step 7.1 — pond bounds from camera frustum; gradient background + fog; tank wireframe/grid removed — (commit pending)
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.

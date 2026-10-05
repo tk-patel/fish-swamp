@@ -24,6 +24,11 @@ import {
   updateSmoothedAudioMood,
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
+import {
+  applyPondFog,
+  applyWaterGradientBackground,
+  computePondSizeFromCamera,
+} from './pond.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -35,31 +40,9 @@ import GUI from 'lil-gui';
 // ---------------------------------------------------------------------------
 const scene = new THREE.Scene();
 
-// ---------------------------------------------------------------------------
-// UNDERWATER MOOD, part 1: background + fog (step 0.5)
-//
-// Background: the color painted wherever nothing else is drawn. Before this
-// it was black (the renderer default), which looks like space, not water.
-// A THREE.Color can be made from a hex number: 0xRRGGBB, so 0x0a4a5c means
-// red = 0x0a, green = 0x4a, blue = 0x5c -> a deep blue-green.
-//
-// Fog: objects far from the camera get blended toward the fog color, so they
-// fade into the "murk". This is the single cheapest trick for faking water.
-//   - Fog / linear:   fade starts at a `near` distance, fully gone at `far`.
-//                     Easy to reason about, but the fade has hard-ish edges.
-//   - FogExp2 / exponential: the fog thickens smoothly with distance, the way
-//                     real haze does: blend = 1 - e^(-(density * distance)^2).
-//                     You only tune one number: `density`.
-// We use FogExp2 because it looks more natural.
-//
-// IMPORTANT: the fog color must equal the background color. If it didn't,
-// far objects would fade into one color while the empty space behind them is
-// another, and you'd see a visible "halo" of the wrong color.
-// ---------------------------------------------------------------------------
-const waterColor = new THREE.Color(0x0a4a5c);
-scene.background = waterColor;
-const fogDensity = 0.025; // bigger = murkier. Try 0.01 (clear) to 0.06 (soup).
-scene.fog = new THREE.FogExp2(waterColor, fogDensity);
+// Step 7.1 — gradient sky/surface behind the pond + depth fog (see pond.js).
+applyWaterGradientBackground(scene);
+applyPondFog(scene, 0.022);
 
 // ---------------------------------------------------------------------------
 // 2. CAMERA - the "eye". PerspectiveCamera behaves like a real camera or your
@@ -86,9 +69,8 @@ const camera = new THREE.PerspectiveCamera(
 // TEMPORARY (step 1.1): a fish is only ~2 units long, so from the full-tank
 // view at (0, 5, 35) it would be a speck. We stay closer while we build one
 // fish. (Step 1.5: moved back and up a little to see more of the area.)
-// Step 1.8: back to the full-tank view (0, 5, 35) so the whole 40 x 20 x 30
-// tank fits on screen. The fish is small from here; scroll to zoom in.
-camera.position.set(0, 5, 35);
+// Pond view: angled down at the water so the frustum footprint is our swim bounds.
+camera.position.set(0, 22, 42);
 
 // ---------------------------------------------------------------------------
 // 3. RENDERER - the "photographer". It takes the scene + camera and paints
@@ -172,10 +154,17 @@ micEnableButton.addEventListener('click', async () => {
 //      Changing camera.aspect does nothing by itself; we must call
 //      updateProjectionMatrix() so the matrix is recalculated.
 // ---------------------------------------------------------------------------
+function updatePondBoundsFromView() {
+  const nextSize = computePondSizeFromCamera(camera);
+  pondSize.copy(nextSize);
+  flock.setPondSize(pondSize);
+}
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  updatePondBoundsFromView();
 });
 
 // ---------------------------------------------------------------------------
@@ -191,6 +180,10 @@ window.addEventListener('resize', () => {
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05; // smaller = longer glide
+controls.target.set(0, 0, 0);
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.minDistance = 18;
+controls.maxDistance = 85;
 
 // ---------------------------------------------------------------------------
 // UNDERWATER MOOD, part 2: lights
@@ -227,34 +220,14 @@ scene.add(sunLight);
 const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 300;
 
 // ---------------------------------------------------------------------------
-// THE TANK (step 1.8) - the box the fish must stay inside.
-// 40 wide (X) x 20 tall (Y) x 30 deep (Z), centered on the origin, so the
-// walls are at x = +-20, y = +-10, z = +-15. The camera also goes back to
-// the full-tank view (set where the camera is created).
-//
-// Two ways to keep fish inside:
-//   HARD CLAMP: if position is outside, force it back to the wall.
-//     Simple and a guaranteed rule, but the fish slams into an invisible wall
-//     and gets stuck sliding along it, and the heading snaps. Looks fake.
-//   SOFT BOUNDARY (what we use): near a wall, add a steering force pointing
-//     inward that gets STRONGER the closer the fish is. The fish sees the wall
-//     coming and curves away early, like a real fish. It is just one more
-//     steering arrow, added to the same sum as wander.
+// POND (phase 7) — swim area matches the camera view on the water plane (y = 0).
+// Soft boundaries (step 1.8) turn fish inward near the invisible banks.
 // ---------------------------------------------------------------------------
-const tankSize = new THREE.Vector3(40, 20, 30);
-
-// TEMPORARY wireframe so we can see the tank. BoxGeometry has two triangles
-// per face; EdgesGeometry keeps only the real box edges (12 lines) so we do
-// not see the diagonal lines through each face. LineSegments draws them.
-const tankWireframe = new THREE.LineSegments(
-  new THREE.EdgesGeometry(new THREE.BoxGeometry(tankSize.x, tankSize.y, tankSize.z)),
-  new THREE.LineBasicMaterial({ color: 0x7fe0ff }),
-);
-scene.add(tankWireframe);
-
-const flock = createFlock(fishCount, tankSize);
+const pondSize = computePondSizeFromCamera(camera);
+const flock = createFlock(fishCount, pondSize);
 scene.add(flock.mesh);
 scene.add(flock.perceptionSphereDebug);
+updatePondBoundsFromView();
 
 // Step 4.1 debug: N cycles which fish is highlighted (magenta) and tints neighbors cyan.
 window.addEventListener('keydown', (event) => {
@@ -263,23 +236,6 @@ window.addEventListener('keydown', (event) => {
     console.log(`watching fish #${flock.watchFishIndex()}, neighbors: ${flock.neighborCount()}`);
   }
 });
-
-// ---------------------------------------------------------------------------
-// TEMPORARY REFERENCE FLOOR (sense of depth).
-// An empty blue-green void has no scale, so you can't tell how far anything
-// is. GridHelper gives your eye something to measure against: a flat grid of
-// lines acting as the tank floor. The tank is 20 tall and centered on y = 0,
-// so its floor is at y = -10.
-//   Args: total size (120), number of divisions (60 -> 2-unit squares),
-//   color of the center lines, color of the other lines.
-// ---------------------------------------------------------------------------
-const referenceFloor = new THREE.GridHelper(120, 60, 0x4fb8c8, 0x1d7a8a);
-referenceFloor.position.y = -10;
-scene.add(referenceFloor);
-
-// (Step 1.8: the reference spheres were removed - there is a fish and a tank
-// to look at now, and spheres floating inside the tank would look like
-// obstacles the fish swims through.)
 
 // ---------------------------------------------------------------------------
 // PERFORMANCE READOUT (step 2.3) - a small text box in the bottom-left corner.
@@ -295,8 +251,7 @@ scene.add(referenceFloor);
 // per frame before the frame rate drops. So "many small meshes" is slow
 // even if every mesh is tiny.
 //
-// Step 3.1: all 300 fish are ONE InstancedMesh = one fish draw call (plus
-// the tank wireframe, grid floor, lights, ...).
+// Step 3.1: all 300 fish are ONE InstancedMesh = one fish draw call (plus lights, ...).
 // ---------------------------------------------------------------------------
 const statsBox = document.createElement('div');
 statsBox.style.cssText =
@@ -473,6 +428,8 @@ function animate() {
   // Always move things as `speed (units per second) * deltaSeconds`
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
+
+  updatePondBoundsFromView();
 
   if (isMicrophoneAnalysisReady()) {
     const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
