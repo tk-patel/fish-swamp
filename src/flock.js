@@ -101,12 +101,27 @@ const worldUp = new THREE.Vector3(0, 1, 0);
 const instancePlacement = new THREE.Object3D();
 const fishColorScratch = new THREE.Color();
 
-/** Orange–gold palette (HSL); instanceColor tints the mesh vertex colors. */
+/**
+ * Koi-style palette (HSL = hue, saturation, lightness). This color is MULTIPLIED
+ * with the grey pattern painted on the fish mesh (fish.js), so the belly and
+ * patches keep their detail whatever color the fish is.
+ */
 function randomFishColor() {
-  const hue = 0.04 + Math.random() * 0.1;
-  const sat = 0.65 + Math.random() * 0.25;
-  const light = 0.42 + Math.random() * 0.18;
-  return fishColorScratch.setHSL(hue, sat, light).clone();
+  const roll = Math.random();
+  if (roll < 0.5) {
+    // orange
+    return fishColorScratch.setHSL(0.05 + Math.random() * 0.03, 0.9, 0.52 + Math.random() * 0.06).clone();
+  }
+  if (roll < 0.72) {
+    // gold / yellow
+    return fishColorScratch.setHSL(0.11 + Math.random() * 0.03, 0.85, 0.55 + Math.random() * 0.05).clone();
+  }
+  if (roll < 0.9) {
+    // red
+    return fishColorScratch.setHSL(0.0 + Math.random() * 0.02, 0.85, 0.47 + Math.random() * 0.05).clone();
+  }
+  // cream white
+  return fishColorScratch.setHSL(0.1, 0.35, 0.86).clone();
 }
 
 function getAxisBoundaryPush(coordinate, halfExtent) {

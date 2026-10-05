@@ -25,10 +25,12 @@
 //   and the instanced flock (phase 3) all depend on this one decision.
 //
 //   The geometry below follows it: the nose tip is at z = +1 and the tail
-//   tip is at z = -1.8.
+//   tip is at z = -1.85.
 // ===========================================================================
 
 import * as THREE from 'three';
+// mergeGeometries lives in the addons folder (like OrbitControls).
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------------------------------------------------------------------------
 // STEP 2.4: THE SINGLE-MESH FISH
@@ -61,12 +63,37 @@ import * as THREE from 'three';
 //   z from -1.05 to -1.8: flares up in height into a flat vertical fin
 // ---------------------------------------------------------------------------
 
-const NOSE_Z = 1.0;
-const BODY_END_Z = -0.6; // where the egg-shaped body ends
-const STALK_Z = -1.05; // the narrowest point (the "wrist" of the tail)
-const TAIL_TIP_Z = -1.8; // the very back of the fin
+// ---------------------------------------------------------------------------
+// STEP 7.6: A BETTER FISH — still ONE mesh, now built from several parts
+//
+// WHY NOT A GLB FILE?  The plan suggested loading a low-poly .glb model with
+// GLTFLoader. That needs a model file, and we have no art asset in the project.
+// So instead of one hand-made file, we build a nicer koi-like fish in code
+// and MERGE every part into a single BufferGeometry. The result behaves like a
+// loaded model would: one geometry, one material, drawn with InstancedMesh,
+// with the same vertex-shader wiggle. (If you later get a .glb, only
+// createFishGeometry() needs to be swapped for `gltf.scene...geometry`.)
+//
+// The parts (all merged into one mesh):
+//   body        - the ring-by-ring egg shape from step 2.4, now ending at the
+//                 tail stalk, painted with a lighter belly and darker patches
+//   tail fin    - a flat FORKED fin (two lobes with a notch between them)
+//   dorsal fin  - the sail on the back
+//   pectoral fins - two small side fins ("arms") near the head
+//   eyes        - two tiny near-black spheres
+//
+// COLOR TRICK: the vertex colors below are mostly GREY (brightness only).
+// Each fish also has an instance color (set in flock.js: orange, gold, red or
+// cream). The GPU MULTIPLIES the two, so grey patterns come out as "the
+// fish's own color, darker here and paler there". One mesh, many looks.
+// ---------------------------------------------------------------------------
 
-const RINGS = 40; // how many slices along Z (more = smoother, more triangles)
+const NOSE_Z = 1.0;
+const BODY_END_Z = -0.6; // where the egg-shaped body starts to narrow
+const STALK_Z = -1.05; // the narrowest point; the body mesh ends here
+const TAIL_TIP_Z = -1.85; // the very back of the tail fin
+
+const RINGS = 36; // how many slices along Z (more = smoother, more triangles)
 const SIDES = 16; // how many points around each slice
 
 // smoothstep(t): turns a straight 0..1 ramp into an S-curve that starts and
@@ -82,60 +109,65 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-// The shape: for a given z, how wide (x) and how tall (y) is the half-ellipse?
+function clamp01(value) {
+  return Math.min(Math.max(value, 0), 1);
+}
+
+// The body shape: for a given z, how wide (x) and how tall (y) is the half-ellipse?
 // Returns the HALF width and HALF height (distance from the center line).
 function getHalfSizeAtZ(z) {
   if (z >= BODY_END_Z) {
     // Egg-shaped body: sqrt(1 - z^2) is 1 in the middle and falls to 0 at the
-    // nose (z = 1), which makes a round nose. Same widths as step 1.1.
+    // nose (z = 1), which makes a round nose.
     const roundness = Math.sqrt(Math.max(0, 1 - z * z));
     return { halfWidth: 0.35 * roundness, halfHeight: 0.5 * roundness };
   }
 
+  // Body -> narrow stalk (the "wrist" the tail fin attaches to).
   const bodyEndRoundness = Math.sqrt(1 - BODY_END_Z * BODY_END_Z); // = 0.8
-  const bodyEndWidth = 0.35 * bodyEndRoundness;
-  const bodyEndHeight = 0.5 * bodyEndRoundness;
-
-  if (z >= STALK_Z) {
-    // Body -> narrow stalk. t goes 0 -> 1 as z moves from BODY_END_Z to STALK_Z.
-    const t = smoothstep01((BODY_END_Z - z) / (BODY_END_Z - STALK_Z));
-    return { halfWidth: lerp(bodyEndWidth, 0.06, t), halfHeight: lerp(bodyEndHeight, 0.12, t) };
-  }
-
-  // Stalk -> fin. The fin grows TALL (height 0.12 -> 0.55) but stays THIN
-  // (width 0.06 -> 0.015): a flat vertical blade, like the cone tail before.
-  const t = smoothstep01((STALK_Z - z) / (STALK_Z - TAIL_TIP_Z));
-  return { halfWidth: lerp(0.06, 0.015, t), halfHeight: lerp(0.12, 0.55, t) };
+  const t = smoothstep01((BODY_END_Z - z) / (BODY_END_Z - STALK_Z));
+  return {
+    halfWidth: lerp(0.35 * bodyEndRoundness, 0.05, t),
+    halfHeight: lerp(0.5 * bodyEndRoundness, 0.11, t),
+  };
 }
 
-function createFishGeometry() {
+/**
+ * Grey brightness (0..1) for one point on the body. `angle` goes around the
+ * ring: sin(angle) = +1 on the back, -1 on the belly.
+ */
+function getBodyBrightness(angle, z) {
+  const backAmount = clamp01(Math.sin(angle) * 0.5 + 0.5); // 0 belly .. 1 back
+  // Real fish are countershaded: pale belly, darker back.
+  let brightness = lerp(1.0, 0.8, Math.pow(backAmount, 1.3));
+
+  // PATCHES, like a koi: where two slow sine waves (along the body and around
+  // it) line up high, paint a darker blotch. No texture needed, just math.
+  const patchValue =
+    Math.sin(z * 5.2 + 1.0) * 0.6 + Math.sin(angle * 2.0 + z * 3.0) * 0.4;
+  const patchAmount = smoothstep01(clamp01((patchValue - 0.25) / 0.3)) * backAmount;
+  brightness *= 1 - 0.5 * patchAmount;
+
+  // A slightly darker snout so the face reads at a distance.
+  brightness *= lerp(1.0, 0.85, clamp01((z - 0.6) / 0.4));
+  return brightness;
+}
+
+function createBodyGeometry() {
   const vertexCount = (RINGS + 1) * SIDES;
   const positions = new Float32Array(vertexCount * 3); // x, y, z per vertex
   const colors = new Float32Array(vertexCount * 3); // r, g, b per vertex
 
-  // Painting the fish with VERTEX COLORS: every vertex gets its own color and
-  // the GPU blends smoothly between them across each triangle. Orange body,
-  // darker orange fin, with a soft transition around the stalk.
-  const bodyColor = new THREE.Color(0xff8c42);
-  const finColor = new THREE.Color(0xc4501a);
-  const vertexColor = new THREE.Color();
-
   for (let ring = 0; ring <= RINGS; ring++) {
-    // ring 0 is at the nose, the last ring at the tail tip.
-    const z = lerp(NOSE_Z, TAIL_TIP_Z, ring / RINGS);
+    // ring 0 is at the nose, the last ring at the tail stalk.
+    const z = lerp(NOSE_Z, STALK_Z, ring / RINGS);
     let { halfWidth, halfHeight } = getHalfSizeAtZ(z);
 
     // The very last ring has zero width: its left and right sides meet in a
-    // line, which CLOSES the fin's back edge (otherwise you could see inside).
+    // line, which CLOSES the back of the body (the tail fin covers that line).
     if (ring === RINGS) {
       halfWidth = 0;
     }
-
-    // Color blends from body to fin color between z = -0.6 and z = -1.05.
-    const colorBlend = smoothstep01(
-      Math.min(Math.max((BODY_END_Z - z) / (BODY_END_Z - STALK_Z), 0), 1),
-    );
-    vertexColor.copy(bodyColor).lerp(finColor, colorBlend);
 
     for (let side = 0; side < SIDES; side++) {
       // A point on the ellipse: angle goes once around (0..2*PI radians);
@@ -143,14 +175,15 @@ function createFishGeometry() {
       // half width/height stretches the circle into an ellipse.
       const angle = (side / SIDES) * Math.PI * 2;
       const vertexIndex = ring * SIDES + side;
+      const brightness = getBodyBrightness(angle, z);
 
       positions[vertexIndex * 3 + 0] = Math.cos(angle) * halfWidth; // x
       positions[vertexIndex * 3 + 1] = Math.sin(angle) * halfHeight; // y
       positions[vertexIndex * 3 + 2] = z; // z
 
-      colors[vertexIndex * 3 + 0] = vertexColor.r;
-      colors[vertexIndex * 3 + 1] = vertexColor.g;
-      colors[vertexIndex * 3 + 2] = vertexColor.b;
+      colors[vertexIndex * 3 + 0] = brightness;
+      colors[vertexIndex * 3 + 1] = brightness;
+      colors[vertexIndex * 3 + 2] = brightness;
     }
   }
 
@@ -181,6 +214,116 @@ function createFishGeometry() {
   // triangles that touch it. Lighting needs this to shade the surface.
   geometry.computeVertexNormals();
   return geometry;
+}
+
+/**
+ * A flat fin made from a few hand-placed points.
+ * @param {number[][]} points      [x, y, z] corners of the fin
+ * @param {number[][]} triangles   triples of indices into `points`
+ * @param {number[]} brightnesses  grey brightness per point (fins fade toward the edge)
+ */
+function createFinGeometry(points, triangles, brightnesses) {
+  const positions = new Float32Array(points.length * 3);
+  const colors = new Float32Array(points.length * 3);
+  points.forEach((point, index) => {
+    positions.set(point, index * 3);
+    colors.fill(brightnesses[index], index * 3, index * 3 + 3);
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.setIndex(triangles.flat());
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function createTailFinGeometry() {
+  // Looking from the side (Y up, tail pointing left, -Z):
+  //
+  //   root top ____ upper mid ___ upper tip
+  //      |                          \
+  //   center .          notch  <-----'      (the "V" cut makes the fork)
+  //      |                          /
+  //   root bottom --- lower mid --- lower tip
+  const points = [
+    [0, 0.1, -1.0], // 0 root top
+    [0.0, 0.34, -1.35], // 1 upper mid
+    [0.0, 0.62, TAIL_TIP_Z], // 2 upper tip
+    [0.0, 0.0, -1.5], // 3 notch
+    [0.0, -0.62, TAIL_TIP_Z], // 4 lower tip
+    [0.0, -0.34, -1.35], // 5 lower mid
+    [0, -0.1, -1.0], // 6 root bottom
+    [0, 0, -1.2], // 7 center (every triangle starts here: a "fan")
+  ];
+  const triangles = [
+    [7, 0, 1],
+    [7, 1, 2],
+    [7, 2, 3],
+    [7, 3, 4],
+    [7, 4, 5],
+    [7, 5, 6],
+    [7, 6, 0],
+  ];
+  // Fins are paler and softer than the body, fading toward the edge.
+  const brightnesses = [0.9, 0.75, 0.6, 0.8, 0.6, 0.75, 0.9, 0.9];
+  return createFinGeometry(points, triangles, brightnesses);
+}
+
+function createDorsalFinGeometry() {
+  const points = [
+    [0, 0.45, 0.25], // 0 front base (sits slightly inside the back)
+    [0, 0.4, -0.55], // 1 back base
+    [0, 0.92, -0.42], // 2 tip
+    [0, 0.76, -0.02], // 3 front edge, halfway up
+  ];
+  const triangles = [
+    [0, 3, 2],
+    [0, 2, 1],
+  ];
+  return createFinGeometry(points, triangles, [0.85, 0.85, 0.6, 0.7]);
+}
+
+function createPectoralFinGeometry(sideSign) {
+  // sideSign = +1 for the fish's left (+X), -1 for its right.
+  const points = [
+    [sideSign * 0.27, -0.12, 0.5], // 0 root, front
+    [sideSign * 0.3, -0.18, 0.1], // 1 root, back
+    [sideSign * 0.78, -0.4, -0.15], // 2 tip
+    [sideSign * 0.64, -0.22, 0.3], // 3 leading edge
+  ];
+  const triangles = [
+    [0, 3, 2],
+    [0, 2, 1],
+  ];
+  return createFinGeometry(points, triangles, [0.9, 0.9, 0.6, 0.75]);
+}
+
+function createEyeGeometry(sideSign) {
+  const eye = new THREE.SphereGeometry(0.075, 8, 6);
+  // SphereGeometry also stores texture coordinates (uv). Our other parts do
+  // not, and merging requires every part to have the SAME attributes.
+  eye.deleteAttribute('uv');
+  // Nearly black.
+  const eyeColors = new Float32Array(eye.attributes.position.count * 3).fill(0.04);
+  eye.setAttribute('color', new THREE.BufferAttribute(eyeColors, 3));
+  // Move it to the side of the head, partly sunk into the body.
+  eye.translate(sideSign * 0.215, 0.13, 0.7);
+  return eye;
+}
+
+function createFishGeometry() {
+  // mergeGeometries glues several geometries into ONE (a single vertex list),
+  // which is what lets the whole fish stay one draw call per instance batch.
+  return mergeGeometries([
+    createBodyGeometry(),
+    createTailFinGeometry(),
+    createDorsalFinGeometry(),
+    createPectoralFinGeometry(1),
+    createPectoralFinGeometry(-1),
+    createEyeGeometry(1),
+    createEyeGeometry(-1),
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +451,13 @@ function ensureSharedFishAssets() {
   sharedFishGeometry = createFishGeometry();
   // vertexColors: true tells the material to use the 'color' attribute we
   // painted above instead of one flat color for the whole mesh.
-  sharedFishMaterial = new THREE.MeshStandardMaterial({ vertexColors: true });
+  // DoubleSide: fins are paper-thin flat shapes, so both faces must be drawn.
+  // roughness 0.5: a little shine, like wet scales.
+  sharedFishMaterial = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.5,
+    side: THREE.DoubleSide,
+  });
   addSwimWiggleToMaterial(sharedFishMaterial);
 }
 
