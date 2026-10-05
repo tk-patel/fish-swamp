@@ -12,6 +12,7 @@
 
 import * as THREE from 'three';
 import { createFishInstancedMesh, fishWaveSettings } from './fish.js';
+import { getDepth01, getDepthColorMultiplier, getDepthScale } from './pond.js';
 
 const boundaryMargin = 5;
 const boundaryWeight = 30;
@@ -113,10 +114,12 @@ function getAxisBoundaryPush(coordinate, halfExtent) {
   return -Math.sign(coordinate) * strength;
 }
 
-function randomInTank(positions, index, tankSize) {
-  positions[index * 3 + 0] = (Math.random() - 0.5) * tankSize.x;
-  positions[index * 3 + 1] = (Math.random() - 0.5) * tankSize.y;
-  positions[index * 3 + 2] = (Math.random() - 0.5) * tankSize.z;
+function randomInPond(positions, index, pondSize) {
+  positions[index * 3 + 0] = (Math.random() - 0.5) * pondSize.x;
+  positions[index * 3 + 2] = (Math.random() - 0.5) * pondSize.z;
+  // y = 0 is the surface; negative y is deeper underwater.
+  const depthFraction = Math.pow(Math.random(), 0.85);
+  positions[index * 3 + 1] = -depthFraction * pondSize.y;
 }
 
 function randomUnitVelocity(velocities, index) {
@@ -248,15 +251,25 @@ function enforceSpeedLimits() {
   velocity.clampLength(minSpeed, maxSpeed);
 }
 
-function setInstanceColorFromBase(mesh, index, baseColors) {
+function setInstanceColorFromBase(mesh, index, baseColors, py, pondColumnDepth) {
   const ci = index * 3;
   fishColorScratch.setRGB(baseColors[ci], baseColors[ci + 1], baseColors[ci + 2]);
+  const depth01 = getDepth01(py, pondColumnDepth);
+  fishColorScratch.multiplyScalar(getDepthColorMultiplier(depth01));
   mesh.setColorAt(index, fishColorScratch);
 }
 
-function applyNeighborDebugColors(mesh, baseColors, watchIndex, neighborIndices, neighborCount) {
+function applyNeighborDebugColors(
+  mesh,
+  baseColors,
+  positions,
+  watchIndex,
+  neighborIndices,
+  neighborCount,
+  pondColumnDepth,
+) {
   for (let i = 0; i < mesh.count; i++) {
-    setInstanceColorFromBase(mesh, i, baseColors);
+    setInstanceColorFromBase(mesh, i, baseColors, positions[i * 3 + 1], pondColumnDepth);
   }
   mesh.setColorAt(watchIndex, fishColorScratch.setHex(0xff66ff));
   fishColorScratch.setHex(0x66ffcc);
@@ -279,11 +292,31 @@ function writeInstanceMatrix(mesh, index, px, py, pz, orientations, scale) {
  * @param {number} count
  * @param {THREE.Vector3} tankSize — full width, height, depth
  */
+function getDepthBoundaryPush(y, surfaceY, bottomY) {
+  if (y > surfaceY - boundaryMargin) {
+    const intoAir = (y - (surfaceY - boundaryMargin)) / boundaryMargin;
+    return -Math.min(Math.max(intoAir, 0), 1);
+  }
+  if (y < bottomY + boundaryMargin) {
+    const intoFloor = (bottomY + boundaryMargin - y) / boundaryMargin;
+    return Math.min(Math.max(intoFloor, 0), 1);
+  }
+  return 0;
+}
+
 export function createFlock(count, tankSize) {
-  const pondHalfSize = tankSize.clone().multiplyScalar(0.5);
+  const pondHalfSize = new THREE.Vector3();
+  let pondSurfaceY = 0;
+  let pondBottomY = -tankSize.y;
+  let pondColumnDepth = tankSize.y;
+
+  pondHalfSize.set(tankSize.x * 0.5, 0, tankSize.z * 0.5);
 
   function setPondSize(nextPondSize) {
-    pondHalfSize.copy(nextPondSize).multiplyScalar(0.5);
+    pondHalfSize.set(nextPondSize.x * 0.5, 0, nextPondSize.z * 0.5);
+    pondColumnDepth = nextPondSize.y;
+    pondSurfaceY = 0;
+    pondBottomY = -nextPondSize.y;
   }
   const mesh = createFishInstancedMesh(count);
 
@@ -300,7 +333,7 @@ export function createFlock(count, tankSize) {
   const wiggleAttribute = mesh.userData.wiggleAttribute;
 
   for (let i = 0; i < count; i++) {
-    randomInTank(positions, i, tankSize);
+    randomInPond(positions, i, tankSize);
     randomUnitVelocity(velocities, i);
     randomWanderOffset(wanderOffsets, i);
     scales[i] = 0.7 + Math.random() * 0.6;
@@ -446,7 +479,7 @@ export function createFlock(count, tankSize) {
 
       boundaryForce.set(
         getAxisBoundaryPush(px, pondHalfSize.x),
-        getAxisBoundaryPush(py, pondHalfSize.y),
+        getDepthBoundaryPush(py, pondSurfaceY, pondBottomY),
         getAxisBoundaryPush(pz, pondHalfSize.z),
       );
       steeringForce.addScaledVector(boundaryForce, boundaryWeight);
@@ -481,15 +514,35 @@ export function createFlock(count, tankSize) {
       fishQuaternion.slerp(targetQuaternion, turnBlend);
       fishQuaternion.toArray(orientations, i * 4);
 
-      writeInstanceMatrix(mesh, i, position.x, position.y, position.z, orientations, scales[i]);
+      const depth01 = getDepth01(position.y, pondColumnDepth);
+      const depthScale = getDepthScale(depth01);
+      writeInstanceMatrix(
+        mesh,
+        i,
+        position.x,
+        position.y,
+        position.z,
+        orientations,
+        scales[i] * depthScale,
+      );
+      setInstanceColorFromBase(mesh, i, baseColors, position.y, pondColumnDepth);
     }
 
     mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceColor.needsUpdate = true;
     phaseAttribute.needsUpdate = true;
     wiggleAttribute.needsUpdate = true;
 
     const neighborCount = findNeighbors(watchFishIndex, positions, count, neighborScratch);
-    applyNeighborDebugColors(mesh, baseColors, watchFishIndex, neighborScratch, neighborCount);
+    applyNeighborDebugColors(
+      mesh,
+      baseColors,
+      positions,
+      watchFishIndex,
+      neighborScratch,
+      neighborCount,
+      pondColumnDepth,
+    );
 
     const wi = watchFishIndex * 3;
     perceptionSphereDebug.position.set(positions[wi], positions[wi + 1], positions[wi + 2]);

@@ -42,7 +42,7 @@ const scene = new THREE.Scene();
 
 // Step 7.1 — gradient sky/surface behind the pond + depth fog (see pond.js).
 applyWaterGradientBackground(scene);
-applyPondFog(scene, 0.022);
+applyPondFog(scene, 0.028);
 
 // ---------------------------------------------------------------------------
 // 2. CAMERA - the "eye". PerspectiveCamera behaves like a real camera or your
@@ -69,8 +69,11 @@ const camera = new THREE.PerspectiveCamera(
 // TEMPORARY (step 1.1): a fish is only ~2 units long, so from the full-tank
 // view at (0, 5, 35) it would be a speck. We stay closer while we build one
 // fish. (Step 1.5: moved back and up a little to see more of the area.)
-// Pond view: angled down at the water so the frustum footprint is our swim bounds.
-camera.position.set(0, 22, 42);
+// Top-down pond view: camera above +Y, looking at the water column (y <= 0 is underwater).
+const topViewHeight = 58;
+camera.position.set(0, topViewHeight, 0);
+camera.up.set(0, 0, -1);
+camera.lookAt(0, 0, 0);
 
 // ---------------------------------------------------------------------------
 // 3. RENDERER - the "photographer". It takes the scene + camera and paints
@@ -180,10 +183,12 @@ window.addEventListener('resize', () => {
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05; // smaller = longer glide
-controls.target.set(0, 0, 0);
-controls.maxPolarAngle = Math.PI * 0.48;
-controls.minDistance = 18;
-controls.maxDistance = 85;
+controls.target.set(0, -4, 0);
+controls.minPolarAngle = 0.02;
+controls.maxPolarAngle = 0.28;
+controls.minDistance = 28;
+controls.maxDistance = 110;
+controls.enablePan = true;
 
 // ---------------------------------------------------------------------------
 // UNDERWATER MOOD, part 2: lights
@@ -209,8 +214,8 @@ const groundColor = 0x06232c; // light bounced up from the deep
 const hemisphereLight = new THREE.HemisphereLight(skyColor, groundColor, 1.2);
 scene.add(hemisphereLight);
 
-const sunLight = new THREE.DirectionalLight(0xcfefff, 1.5);
-sunLight.position.set(10, 30, 10); // high above, slightly off-center
+const sunLight = new THREE.DirectionalLight(0xcfefff, 1.35);
+sunLight.position.set(8, 50, 12);
 scene.add(sunLight);
 
 // ---------------------------------------------------------------------------

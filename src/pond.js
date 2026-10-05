@@ -2,8 +2,8 @@
 
 import * as THREE from 'three';
 
-/** Shallow water column (fish stay near the pond mid-depth). */
-export const pondWaterHeight = 10;
+/** Water column depth below the surface (y = 0). Fish swim from 0 down to -pondWaterHeight. */
+export const pondWaterHeight = 14;
 
 const pondPlaneY = 0;
 const frustumCornerNdc = [
@@ -76,18 +76,17 @@ export function computePondSizeFromCamera(camera, margin = 0.88) {
 const fogDeepColor = new THREE.Color(0x062a35);
 
 /**
- * Vertical gradient: bright surface at top of screen, deep teal at bottom.
- * (CanvasTexture on scene.background — cheap and works on all GPUs.)
+ * Radial gradient for top-down view: lighter center (open water), darker at edges.
  */
 export function applyWaterGradientBackground(scene) {
   const canvas = document.createElement('canvas');
-  canvas.width = 4;
+  canvas.width = 512;
   canvas.height = 512;
   const context = canvas.getContext('2d');
-  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, '#6fd4f0');
-  gradient.addColorStop(0.22, '#3aa8c4');
-  gradient.addColorStop(0.55, '#1a6f82');
+  const gradient = context.createRadialGradient(256, 256, 24, 256, 256, 280);
+  gradient.addColorStop(0, '#5ecbe6');
+  gradient.addColorStop(0.45, '#2f9db5');
+  gradient.addColorStop(0.78, '#1a6f82');
   gradient.addColorStop(1, '#062a35');
   context.fillStyle = gradient;
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -109,4 +108,22 @@ export function applyPondFog(scene, density = 0.022) {
 
 export function getPondFogColor() {
   return fogDeepColor;
+}
+
+/** 0 at surface (y = 0), 1 at pond bottom (y = -pondDepth). */
+export function getDepth01(y, pondDepth = pondWaterHeight) {
+  if (pondDepth <= 0) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, -y / pondDepth));
+}
+
+/** Smaller fish when deeper (top-down camera + manual scale for readability). */
+export function getDepthScale(depth01) {
+  return 1 - depth01 * 0.52;
+}
+
+/** Darken instance color when deeper (murk + fog read). */
+export function getDepthColorMultiplier(depth01) {
+  return 0.28 + (1 - depth01) * 0.72;
 }
