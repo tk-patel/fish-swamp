@@ -24,6 +24,7 @@ import {
   updateSmoothedAudioMood,
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
+import { createLightShafts } from './caustics.js';
 import { createPondEnvironment } from './environment.js';
 import { applyPondFog, applyWaterGradientBackground, createPondSize } from './pond.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
@@ -219,6 +220,10 @@ const fishCount = Number(new URLSearchParams(window.location.search).get('fish')
 // Step 7.2 — sand floor, rocks and swaying plants (see environment.js).
 const pondEnvironment = createPondEnvironment();
 scene.add(pondEnvironment.group);
+
+// Step 7.3 — see-through light beams from the surface (caustics live in the floor material).
+const lightShafts = createLightShafts();
+scene.add(lightShafts.group);
 
 const pondSize = createPondSize();
 const flock = createFlock(fishCount, pondSize);
@@ -418,6 +423,7 @@ function animate() {
   const deltaSeconds = timer.getDelta();
   elapsedSeconds += deltaSeconds;
   pondEnvironment.update(elapsedSeconds);
+  lightShafts.update(elapsedSeconds);
 
   if (isMicrophoneAnalysisReady()) {
     const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();

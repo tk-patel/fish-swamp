@@ -8,6 +8,7 @@
 // y = -pondWaterDepth is the floor.
 
 import * as THREE from 'three';
+import { addCausticsToMaterial, causticUniforms } from './caustics.js';
 import { pondLength, pondWaterDepth, pondWidth } from './pond.js';
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,7 @@ function createFloor() {
   geometry.computeVertexNormals();
 
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+  addCausticsToMaterial(material); // step 7.3: dancing sunlight on the sand
   return new THREE.Mesh(geometry, material);
 }
 
@@ -119,6 +121,7 @@ function createRocks(random) {
     roughness: 0.95,
     flatShading: true,
   });
+  addCausticsToMaterial(rockMaterial); // step 7.3
   // All rocks share one material (cheaper); each rock gets its own random shape.
 
   const bigRockCount = 12;
@@ -302,6 +305,7 @@ export function createPondEnvironment() {
     /** Call every frame with total elapsed seconds so the plants sway. */
     update(elapsedSeconds) {
       plantUniforms.uPlantTime.value = elapsedSeconds;
+      causticUniforms.uCausticTime.value = elapsedSeconds;
     },
   };
 }
