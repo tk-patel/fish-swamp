@@ -51,24 +51,33 @@ function smoothstep01(t) {
  *   silence: high wander, low school forces
  *   calm:    strong alignment + cohesion, moderate separation and speed
  *   chaos:   weak cohesion, strong separation, faster swim, flee (wired in step 5.4)
+ *
+ * Two of these numbers matter most for how "together" the group looks:
+ *   cohesionWeight  = how strongly a fish is pulled toward the centre of its
+ *                     neighbours (the "pull toward neighbours' centre").
+ *   perceptionRadius = how far a fish can see its friends (how many neighbours
+ *                     count as "nearby").
+ * Raising both in silence keeps the group loosely together while wanderWeight
+ * still lets each fish do its own thing; raising them further in calm merges
+ * the whole pond into one tight school. (Tuned for the new pond, step 8.4.)
  */
 const moodAnchors = {
   silence: {
-    wanderWeight: 1.35,
+    wanderWeight: 1.1,       // still individual, but a bit less random
     separationWeight: 1.0,
-    alignmentWeight: 0.35,
-    cohesionWeight: 0.3,
-    maxSpeed: 2.0,
-    perceptionRadius: 6.5,
+    alignmentWeight: 0.45,
+    cohesionWeight: 0.75,    // was 0.3 -> loose group instead of spread out
+    maxSpeed: 1.9,
+    perceptionRadius: 9,     // was 6.5 -> fish notice the group from further away
     fleeWeight: 0,
   },
   calm: {
-    wanderWeight: 0.45,
-    separationWeight: 1.15,
-    alignmentWeight: 1.55,
-    cohesionWeight: 1.65,
-    maxSpeed: 2.45,
-    perceptionRadius: 10,
+    wanderWeight: 0.3,
+    separationWeight: 1.1,
+    alignmentWeight: 1.8,
+    cohesionWeight: 1.9,
+    maxSpeed: 2.4,
+    perceptionRadius: 13,    // bigger -> the whole pond merges into ONE school
     fleeWeight: 0,
   },
   chaos: {
