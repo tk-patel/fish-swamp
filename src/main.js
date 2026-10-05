@@ -223,11 +223,33 @@ scene.add(flock.mesh);
 //
 // Step 3.1: all 300 fish are ONE InstancedMesh = one fish draw call (plus lights, ...).
 // ---------------------------------------------------------------------------
+// Step 8.2 — one boolean drives every debug panel. While it is false the page
+// looks like a plain pond: the stats box, the audio meters and the lil-gui
+// panel are all hidden. Pressing C flips it and every panel follows. Keeping a
+// single flag means the panels can never disagree about whether they show.
+let areControlsVisible = false;
+
 const statsBox = document.createElement('div');
 statsBox.style.cssText =
   'position:fixed;left:8px;bottom:8px;padding:6px 8px;background:rgba(0,0,0,0.55);' +
   'color:#cfefff;font:12px/1.4 monospace;pointer-events:none;white-space:pre;';
+// Step 8.2 — start hidden; setControlsVisible() is the only thing that turns
+// it on (the CSS above still says how it looks, we just don't show it yet).
+statsBox.style.display = 'none';
 document.body.appendChild(statsBox);
+
+// Step 8.2 — tiny hint so the owner discovers the key. It sits at the bottom
+// right, ignores clicks (pointer-events:none) and fades out 6 seconds after
+// load via a CSS opacity transition, so it never gets in the way of the pond.
+const controlsHint = document.createElement('div');
+controlsHint.textContent = 'press C for controls';
+controlsHint.style.cssText =
+  'position:fixed;right:12px;bottom:10px;color:rgba(255,255,255,0.75);' +
+  'font:12px system-ui,sans-serif;pointer-events:none;transition:opacity 1.5s;';
+document.body.appendChild(controlsHint);
+setTimeout(() => {
+  controlsHint.style.opacity = '0';
+}, 6000);
 
 // ---------------------------------------------------------------------------
 // AUDIO METERS (steps 6.3–6.7) — loudness, volatility, flux, energy, chaos.
@@ -282,6 +304,8 @@ function setAudioBar(fillElement, value01) {
 //   speed      - how fast the wave travels = how quickly the tail beats.
 // ---------------------------------------------------------------------------
 const gui = new GUI();
+// Step 8.2 — hidden on load; setControlsVisible() shows it when C is pressed.
+gui.hide();
 const waveFolder = gui.addFolder('Swim wave');
 waveFolder.add(fishWaveUniforms.uAmplitude, 'value', 0, 1, 0.01).name('amplitude');
 waveFolder.add(fishWaveUniforms.uWavelength, 'value', 0.5, 8, 0.1).name('wavelength');
@@ -349,6 +373,26 @@ moodFolder.add(moodPresetActions, 'silence').name('silence (key 1)');
 moodFolder.add(moodPresetActions, 'calm').name('calm (key 2)');
 moodFolder.add(moodPresetActions, 'chaos').name('chaos (key 3)');
 
+// Step 8.2 — show or hide every debug panel from one place. `gui.show()` /
+// `gui.hide()` do the lil-gui panel; the stats box is plain CSS display.
+function setControlsVisible(visible) {
+  areControlsVisible = visible;
+
+  if (visible) {
+    gui.show();
+  } else {
+    gui.hide();
+  }
+
+  statsBox.style.display = visible ? 'block' : 'none';
+
+  // The audio panel only makes sense once the mic is running: animate() brings
+  // it back on while controls are visible. Hiding it here turns it off now.
+  if (!visible) {
+    audioMeterPanel.style.display = 'none';
+  }
+}
+
 window.addEventListener('keydown', (event) => {
   if (event.key === '1') {
     setMoodPreset('silence');
@@ -361,6 +405,11 @@ window.addEventListener('keydown', (event) => {
   } else if (event.key === 'm' || event.key === 'M') {
     setMoodManualMode(!moodInputMode.manualMode);
     manualMoodController.updateDisplay();
+  } else if ((event.key === 'c' || event.key === 'C') && !event.repeat) {
+    // `event.repeat` is true while a key is held down and the OS sends the
+    // auto-repeat presses. Ignoring those keeps a held C from flickering the
+    // panels on and off many times a second.
+    setControlsVisible(!areControlsVisible);
   }
 });
 
@@ -413,7 +462,10 @@ function animate() {
       moodChaosController.updateDisplay();
     }
 
-    audioMeterPanel.style.display = 'block';
+    // Step 8.2 — respect the C toggle. This runs every frame while the mic is
+    // live, so without the check it would re-show the panel 60 times a second
+    // even after setControlsVisible(false) had hidden it.
+    audioMeterPanel.style.display = areControlsVisible ? 'block' : 'none';
     if (isNoiseFloorCalibrating()) {
       audioMeterStatus.textContent = 'calibrating… (quiet, R)';
       setAudioBar(audioBarFills.loudness, 0);
