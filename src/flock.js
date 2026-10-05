@@ -102,26 +102,33 @@ const instancePlacement = new THREE.Object3D();
 const fishColorScratch = new THREE.Color();
 
 /**
- * Koi-style palette (HSL = hue, saturation, lightness). This color is MULTIPLIED
- * with the grey pattern painted on the fish mesh (fish.js), so the belly and
- * patches keep their detail whatever color the fish is.
+ * Salmon palette (HSL = hue, saturation, lightness). This color is MULTIPLIED
+ * with the grey pattern painted on the fish mesh (fish.js), so the pale belly,
+ * the silvery side band and the back speckles keep their detail whatever color
+ * the fish is. Mix of real salmon looks: silver-blue, olive, rosy pink and
+ * spawning sockeye red.
  */
 function randomFishColor() {
   const roll = Math.random();
-  if (roll < 0.5) {
-    // orange
-    return fishColorScratch.setHSL(0.05 + Math.random() * 0.03, 0.9, 0.52 + Math.random() * 0.06).clone();
+  if (roll < 0.4) {
+    // silver-blue Atlantic salmon (40%)
+    const r = Math.random();
+    return fishColorScratch.setHSL(0.55 + r * 0.04, 0.25 + r * 0.1, 0.62 + r * 0.08).clone();
   }
-  if (roll < 0.72) {
-    // gold / yellow
-    return fishColorScratch.setHSL(0.11 + Math.random() * 0.03, 0.85, 0.55 + Math.random() * 0.05).clone();
+  if (roll < 0.6) {
+    // olive / green-grey back (20%)
+    const r = Math.random();
+    return fishColorScratch.setHSL(0.22 + r * 0.04, 0.25, 0.55 + r * 0.06).clone();
   }
-  if (roll < 0.9) {
-    // red
-    return fishColorScratch.setHSL(0.0 + Math.random() * 0.02, 0.85, 0.47 + Math.random() * 0.05).clone();
+  if (roll < 0.85) {
+    // rosy pink salmon (25%). Hue 0.98 + a little wraps past 1.0, so we take
+    // the remainder (% 1) to keep it a valid hue near red.
+    const r = Math.random();
+    return fishColorScratch.setHSL((0.98 + r * 0.02) % 1, 0.55, 0.7 + r * 0.06).clone();
   }
-  // cream white
-  return fishColorScratch.setHSL(0.1, 0.35, 0.86).clone();
+  // red spawning sockeye (15%)
+  const r = Math.random();
+  return fishColorScratch.setHSL(0.0 + r * 0.02, 0.75, 0.5 + r * 0.05).clone();
 }
 
 function getAxisBoundaryPush(coordinate, halfExtent) {
@@ -326,7 +333,10 @@ export function createFlock(count, tankSize) {
     randomInPond(positions, i, tankSize);
     randomUnitVelocity(velocities, i);
     randomWanderOffset(wanderOffsets, i);
-    scales[i] = 0.7 + Math.random() * 0.6;
+    // Average of two randoms piles up near 0.5 (a "triangle" distribution),
+    // so most fish are medium sized and very small / very big ones are rarer.
+    const sizeRoll = (Math.random() + Math.random()) * 0.5;
+    scales[i] = 0.55 + sizeRoll * 0.95; // 0.55 .. 1.5
     const color = randomFishColor();
     mesh.setColorAt(i, color);
     orientationFromVelocity(

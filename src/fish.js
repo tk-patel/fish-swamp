@@ -1,8 +1,8 @@
 // fish.js - builds the fish.
 //
 // UNITS: 1 world unit is about half a fish body length, so our fish is
-// roughly 2.8 units long from nose to tail tip. (The tank is 40 x 20 x 30
-// units, so that is a believable size for a fish in it.)
+// roughly 3.65 units long from nose to tail tip (nose at z = +1.35, tail tip
+// at z = -2.3). (The pond is tens of units across, so that is believable.)
 //
 // ===========================================================================
 // FORWARD DIRECTION CONVENTION  (decided in step 1.3 - never change this!)
@@ -24,8 +24,8 @@
 //   with no extra rotation maths. Velocity-based steering (steps 1.4-1.6)
 //   and the instanced flock (phase 3) all depend on this one decision.
 //
-//   The geometry below follows it: the nose tip is at z = +1 and the tail
-//   tip is at z = -1.85.
+//   The geometry below follows it: the nose tip is at z = +1.35 and the tail
+//   tip is at z = -2.3.
 // ===========================================================================
 
 import * as THREE from 'three';
@@ -53,47 +53,57 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // ("ring") is an ellipse, with a width (X) and a height (Y). If we choose the
 // ellipse size for every slice, we have chosen the whole shape:
 //
-//    nose z=+1                                   tail tip z=-1.8
+//    nose z=+1.35                                 tail tip z=-2.3
 //      .-~~~~~-.______                            |\
 //     (  body   )_____ ) ~~ thin "neck" ~~~~~~~~~~| |  <- fin: tall but very
 //      '-.___.-'                                  |/        thin from the side
 //
-//   z from +1 to -0.6 : an ellipsoid (the same egg as step 1.1)
-//   z from -0.6 to -1.05: squeezes down to a thin "tail stalk" (the narrowest)
-//   z from -1.05 to -1.8: flares up in height into a flat vertical fin
+//   z from +1.35 to -0.85 : a long ellipsoid (a stretched step-1.1 egg)
+//   z from -0.85 to -1.55 : squeezes down to a thin "tail stalk" (narrowest)
+//   z from -1.55 to -2.3  : flares up in height into a flat vertical fin
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // STEP 7.6: A BETTER FISH — still ONE mesh, now built from several parts
+// STEP 8.3: reshaped from a koi into a SALMON (long, slim, compressed)
 //
 // WHY NOT A GLB FILE?  The plan suggested loading a low-poly .glb model with
 // GLTFLoader. That needs a model file, and we have no art asset in the project.
-// So instead of one hand-made file, we build a nicer koi-like fish in code
-// and MERGE every part into a single BufferGeometry. The result behaves like a
-// loaded model would: one geometry, one material, drawn with InstancedMesh,
-// with the same vertex-shader wiggle. (If you later get a .glb, only
-// createFishGeometry() needs to be swapped for `gltf.scene...geometry`.)
+// So instead of one hand-made file, we build the fish in code and MERGE every
+// part into a single BufferGeometry. The result behaves like a loaded model
+// would: one geometry, one material, drawn with InstancedMesh, with the same
+// vertex-shader wiggle. (If you later get a .glb, only createFishGeometry()
+// needs to be swapped for `gltf.scene...geometry`.)
 //
 // The parts (all merged into one mesh):
-//   body        - the ring-by-ring egg shape from step 2.4, now ending at the
-//                 tail stalk, painted with a lighter belly and darker patches
-//   tail fin    - a flat FORKED fin (two lobes with a notch between them)
-//   dorsal fin  - the sail on the back
-//   pectoral fins - two small side fins ("arms") near the head
+//   body        - the ring-by-ring shape from step 2.4, now a long salmon body
+//                 ending at the tail stalk, painted with a pale belly, a
+//                 silvery band along the side, a darker speckled back and a
+//                 slightly darker snout
+//   tail fin    - a flat fin with a MODERATE fork (two lobes, small notch)
+//   dorsal fin  - the sail on the middle of the back
+//   adipose fin - the tiny fleshy flap salmon and trout have before the tail
+//   pectoral fins - two small side fins ("arms") tucked under the front body
 //   eyes        - two tiny near-black spheres
 //
+// LATERALLY COMPRESSED: a real salmon is taller than it is wide (flattened
+// from the sides), so getHalfSizeAtZ() returns a halfHeight bigger than its
+// halfWidth. That is what makes the fish read as slim from the top-down pond
+// camera, which mostly sees the fish's back.
+//
 // COLOR TRICK: the vertex colors below are mostly GREY (brightness only).
-// Each fish also has an instance color (set in flock.js: orange, gold, red or
-// cream). The GPU MULTIPLIES the two, so grey patterns come out as "the
-// fish's own color, darker here and paler there". One mesh, many looks.
+// Each fish also has an instance color (set in flock.js: silvery blue, olive,
+// rosy pink or sockeye red). The GPU MULTIPLIES the two, so grey patterns come
+// out as "the fish's own color, darker here and paler there". One mesh, many
+// looks.
 // ---------------------------------------------------------------------------
 
-const NOSE_Z = 1.0;
-const BODY_END_Z = -0.6; // where the egg-shaped body starts to narrow
-const STALK_Z = -1.05; // the narrowest point; the body mesh ends here
-const TAIL_TIP_Z = -1.85; // the very back of the tail fin
+const NOSE_Z = 1.35;
+const BODY_END_Z = -0.85; // where the salmon body starts to narrow
+const STALK_Z = -1.55; // the narrowest point; the body mesh ends here
+const TAIL_TIP_Z = -2.3; // the very back of the tail fin
 
-const RINGS = 36; // how many slices along Z (more = smoother, more triangles)
+const RINGS = 44; // how many slices along Z (more slices = smoother long body)
 const SIDES = 16; // how many points around each slice
 
 // smoothstep(t): turns a straight 0..1 ramp into an S-curve that starts and
@@ -115,41 +125,74 @@ function clamp01(value) {
 
 // The body shape: for a given z, how wide (x) and how tall (y) is the half-ellipse?
 // Returns the HALF width and HALF height (distance from the center line).
+// STEP 8.3: this is the SALMON profile — long, slim and flattened from the sides.
 function getHalfSizeAtZ(z) {
   if (z >= BODY_END_Z) {
-    // Egg-shaped body: sqrt(1 - z^2) is 1 in the middle and falls to 0 at the
-    // nose (z = 1), which makes a round nose.
-    const roundness = Math.sqrt(Math.max(0, 1 - z * z));
-    return { halfWidth: 0.35 * roundness, halfHeight: 0.5 * roundness };
+    // Normalise z by the nose position. u = 1 AT the nose, u = 0 at the widest
+    // point (z = 0) and negative toward the tail. Working with the fraction u
+    // instead of the raw z keeps the maths the same however long the fish is.
+    const u = z / NOSE_Z;
+    // sqrt(1 - u^2) is the classic ellipse: 1 in the middle, falling to 0 at
+    // the nose. On its own that gives a round, blunt nose.
+    const roundness = Math.sqrt(Math.max(0, 1 - u * u));
+
+    // POINTED SNOUT: raising roundness to a power bigger than 1 makes it fall
+    // off faster near the nose (roundness -> 0 sooner), turning the blunt ball
+    // into a cone-ish snout. The exponent grows from 0.75 at the middle to
+    // 1.35 at the nose (0.75 + 0.6 * 1), so only the front sharpens up.
+    const snoutTaper = Math.pow(roundness, 0.75 + 0.6 * clamp01(u));
+
+    // halfWidth < halfHeight => taller than it is wide, i.e. LATERALLY
+    // COMPRESSED, exactly like a real salmon seen from above.
+    return { halfWidth: 0.22 * snoutTaper, halfHeight: 0.34 * snoutTaper };
   }
 
-  // Body -> narrow stalk (the "wrist" the tail fin attaches to).
-  const bodyEndRoundness = Math.sqrt(1 - BODY_END_Z * BODY_END_Z); // = 0.8
+  // Body -> narrow stalk (the "wrist" the tail fin attaches to). We start from
+  // the SAME tapered value the body branch has at z = BODY_END_Z so the two
+  // branches join with no step, then smoothstep-blend down to the thin stalk.
+  const bodyEndU = BODY_END_Z / NOSE_Z;
+  const bodyEndRoundness = Math.sqrt(Math.max(0, 1 - bodyEndU * bodyEndU));
+  const bodyEndTaper = Math.pow(bodyEndRoundness, 0.75 + 0.6 * clamp01(bodyEndU));
   const t = smoothstep01((BODY_END_Z - z) / (BODY_END_Z - STALK_Z));
   return {
-    halfWidth: lerp(0.35 * bodyEndRoundness, 0.05, t),
-    halfHeight: lerp(0.5 * bodyEndRoundness, 0.11, t),
+    halfWidth: lerp(0.22 * bodyEndTaper, 0.045, t),
+    halfHeight: lerp(0.34 * bodyEndTaper, 0.09, t),
   };
 }
 
 /**
  * Grey brightness (0..1) for one point on the body. `angle` goes around the
- * ring: sin(angle) = +1 on the back, -1 on the belly.
+ * ring: sin(angle) = +1 on the back, -1 on the belly, 0 on the sides.
+ * STEP 8.3: salmon colouring — countershading, a silvery side band, dark
+ * speckles on the upper half and a darker snout.
  */
 function getBodyBrightness(angle, z) {
   const backAmount = clamp01(Math.sin(angle) * 0.5 + 0.5); // 0 belly .. 1 back
-  // Real fish are countershaded: pale belly, darker back.
-  let brightness = lerp(1.0, 0.8, Math.pow(backAmount, 1.3));
 
-  // PATCHES, like a koi: where two slow sine waves (along the body and around
-  // it) line up high, paint a darker blotch. No texture needed, just math.
-  const patchValue =
-    Math.sin(z * 5.2 + 1.0) * 0.6 + Math.sin(angle * 2.0 + z * 3.0) * 0.4;
-  const patchAmount = smoothstep01(clamp01((patchValue - 0.25) / 0.3)) * backAmount;
-  brightness *= 1 - 0.5 * patchAmount;
+  // COUNTERSHADING: pale (silvery) belly, darker back. pow(backAmount, 1.2)
+  // pushes the darkening up toward the top, so the flanks stay bright and only
+  // the true back goes dark — the way a real salmon fades into the water
+  // below and stands out against it from above.
+  let brightness = lerp(1.0, 0.62, Math.pow(backAmount, 1.2));
 
-  // A slightly darker snout so the face reads at a distance.
-  brightness *= lerp(1.0, 0.85, clamp01((z - 0.6) / 0.4));
+  // LATERAL LINE: a slightly brighter silvery band along each side. sin(angle)
+  // is +-1 on the back/belly and 0 on the sides, so (1 - |sin(angle)|) is 1 at
+  // the sides and 0 top/bottom. We increase brightness there.
+  const sideAmount = 1 - Math.abs(Math.sin(angle));
+  brightness *= 1 + 0.12 * sideAmount;
+  brightness = Math.min(brightness, 1.0); // never brighter than "full" white
+
+  // SPECKLES: salmon have small dark spots on the upper half. Two sine waves
+  // (one running along the body in z, one wrapping around in angle) multiply;
+  // only where both are high (> 0.55) do we darken a small patch. Multiplying
+  // by backAmount keeps the spots off the pale belly.
+  const speckle = Math.sin(z * 23.0) * Math.sin(angle * 9.0 + z * 7.0);
+  const speckleAmount = smoothstep01(clamp01((speckle - 0.55) / 0.25)) * backAmount;
+  brightness *= 1 - 0.45 * speckleAmount;
+
+  // A slightly darker snout so the face reads at a distance. The ramp runs from
+  // z = NOSE_Z - 0.4 (start of the darkening) to the nose at z = NOSE_Z.
+  brightness *= lerp(1.0, 0.85, clamp01((z - (NOSE_Z - 0.4)) / 0.4));
   return brightness;
 }
 
@@ -243,18 +286,21 @@ function createTailFinGeometry() {
   //
   //   root top ____ upper mid ___ upper tip
   //      |                          \
-  //   center .          notch  <-----'      (the "V" cut makes the fork)
+  //   center .          notch  <-----'    (the "V" cut makes the fork)
   //      |                          /
   //   root bottom --- lower mid --- lower tip
+  //
+  // STEP 8.3: the fork is only MODERATE now (tips ±0.5, mid ±0.3) — salmon
+  // tails are forked, but nowhere near as deep as a koi's double tail.
   const points = [
-    [0, 0.1, -1.0], // 0 root top
-    [0.0, 0.34, -1.35], // 1 upper mid
-    [0.0, 0.62, TAIL_TIP_Z], // 2 upper tip
-    [0.0, 0.0, -1.5], // 3 notch
-    [0.0, -0.62, TAIL_TIP_Z], // 4 lower tip
-    [0.0, -0.34, -1.35], // 5 lower mid
-    [0, -0.1, -1.0], // 6 root bottom
-    [0, 0, -1.2], // 7 center (every triangle starts here: a "fan")
+    [0, 0.09, STALK_Z + 0.05], // 0 root top (just ahead of the stalk)
+    [0.0, 0.3, -1.85], // 1 upper mid
+    [0.0, 0.5, TAIL_TIP_Z], // 2 upper tip
+    [0.0, 0.0, -2.05], // 3 notch (the "V" between the lobes)
+    [0.0, -0.5, TAIL_TIP_Z], // 4 lower tip
+    [0.0, -0.3, -1.85], // 5 lower mid
+    [0, -0.09, STALK_Z + 0.05], // 6 root bottom
+    [0, 0, -1.75], // 7 center (every triangle starts here: a "fan")
   ];
   const triangles = [
     [7, 0, 1],
@@ -271,11 +317,13 @@ function createTailFinGeometry() {
 }
 
 function createDorsalFinGeometry() {
+  // STEP 8.3: sits on the MIDDLE of the back (z ≈ 0.35 .. -0.25) instead of far
+  // back, matching where a salmon's dorsal fin actually is.
   const points = [
-    [0, 0.45, 0.25], // 0 front base (sits slightly inside the back)
-    [0, 0.4, -0.55], // 1 back base
-    [0, 0.92, -0.42], // 2 tip
-    [0, 0.76, -0.02], // 3 front edge, halfway up
+    [0, 0.3, 0.35], // 0 front base (sits slightly inside the back)
+    [0, 0.27, -0.25], // 1 back base
+    [0, 0.62, -0.12], // 2 tip
+    [0, 0.52, 0.2], // 3 front edge, halfway up
   ];
   const triangles = [
     [0, 3, 2],
@@ -284,13 +332,31 @@ function createDorsalFinGeometry() {
   return createFinGeometry(points, triangles, [0.85, 0.85, 0.6, 0.7]);
 }
 
+// STEP 8.3: ADIPOSE FIN — salmon and trout have this small fleshy flap with no
+// fin rays (no skeleton inside) sitting between the dorsal fin and the tail.
+// It is the quickest way to spot a salmonid, so we add one as a tiny flap.
+function createAdiposeFinGeometry() {
+  const points = [
+    [0, 0.13, -1.1], // 0 front base
+    [0, 0.1, -1.38], // 1 back base
+    [0, 0.24, -1.3], // 2 rear tip
+    [0, 0.22, -1.15], // 3 front tip
+  ];
+  const triangles = [
+    [0, 3, 2],
+    [0, 2, 1],
+  ];
+  return createFinGeometry(points, triangles, [0.7, 0.7, 0.55, 0.6]);
+}
+
 function createPectoralFinGeometry(sideSign) {
   // sideSign = +1 for the fish's left (+X), -1 for its right.
+  // STEP 8.3: smaller and tucked under the FRONT of the slimmer body.
   const points = [
-    [sideSign * 0.27, -0.12, 0.5], // 0 root, front
-    [sideSign * 0.3, -0.18, 0.1], // 1 root, back
-    [sideSign * 0.78, -0.4, -0.15], // 2 tip
-    [sideSign * 0.64, -0.22, 0.3], // 3 leading edge
+    [sideSign * 0.18, -0.16, 0.75], // 0 root, front
+    [sideSign * 0.2, -0.2, 0.4], // 1 root, back
+    [sideSign * 0.55, -0.34, 0.15], // 2 tip
+    [sideSign * 0.45, -0.24, 0.55], // 3 leading edge
   ];
   const triangles = [
     [0, 3, 2],
@@ -300,7 +366,7 @@ function createPectoralFinGeometry(sideSign) {
 }
 
 function createEyeGeometry(sideSign) {
-  const eye = new THREE.SphereGeometry(0.075, 8, 6);
+  const eye = new THREE.SphereGeometry(0.06, 8, 6);
   // SphereGeometry also stores texture coordinates (uv). Our other parts do
   // not, and merging requires every part to have the SAME attributes.
   eye.deleteAttribute('uv');
@@ -308,7 +374,10 @@ function createEyeGeometry(sideSign) {
   const eyeColors = new Float32Array(eye.attributes.position.count * 3).fill(0.04);
   eye.setAttribute('color', new THREE.BufferAttribute(eyeColors, 3));
   // Move it to the side of the head, partly sunk into the body.
-  eye.translate(sideSign * 0.215, 0.13, 0.7);
+  // STEP 8.3: at z = 1.0 the body halfWidth is only ~0.137, and a touch less at
+  // y = 0.1 (the eye sits above the centre line), so x = 0.13 puts the eye
+  // centre right on the surface: half the little ball shows, half is inside.
+  eye.translate(sideSign * 0.13, 0.1, 1.0);
   return eye;
 }
 
@@ -319,6 +388,7 @@ function createFishGeometry() {
     createBodyGeometry(),
     createTailFinGeometry(),
     createDorsalFinGeometry(),
+    createAdiposeFinGeometry(),
     createPectoralFinGeometry(1),
     createPectoralFinGeometry(-1),
     createEyeGeometry(1),
@@ -358,9 +428,10 @@ function createFishGeometry() {
 export const fishWaveUniforms = {
   // How far the tail tip swings sideways, in world units.
   uAmplitude: { value: 0.35 },
-  // Distance along the body for one full S-curve. Fish are ~2.8 long, so 3.0
-  // means "about one S-curve along the whole body".
-  uWavelength: { value: 3.0 },
+  // Distance along the body for one full S-curve. Fish are ~3.65 long, so 3.8
+  // means "about one S-curve along the whole body". Step 8.3 raised this from
+  // 3.0: a longer body gets a longer, lazier wave, the way a big salmon swims.
+  uWavelength: { value: 3.8 },
   // Step 5.6: 0 = calm slow wag, 1 = panicked fast flap (set from mood in main.js).
   uMood: { value: 0 },
 };
@@ -373,7 +444,7 @@ export const fishWaveSettings = {
   moodSpeedMul: 1.0,
 };
 
-const WAVE_HEAD_Z = 0.8; // from here forward the body stays perfectly still
+const WAVE_HEAD_Z = 1.0; // from here forward the body stays perfectly still
 
 function addSwimWiggleToMaterial(material) {
   material.onBeforeCompile = (shader) => {
@@ -452,10 +523,13 @@ function ensureSharedFishAssets() {
   // vertexColors: true tells the material to use the 'color' attribute we
   // painted above instead of one flat color for the whole mesh.
   // DoubleSide: fins are paper-thin flat shapes, so both faces must be drawn.
-  // roughness 0.5: a little shine, like wet scales.
+  // roughness 0.35 / metalness 0.25: fairly smooth and slightly metallic. Real
+  // fish scales are wet and a bit reflective, so this gives salmon that silvery
+  // sheen without turning them into mirrors.
   sharedFishMaterial = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.5,
+    roughness: 0.35,
+    metalness: 0.25,
     side: THREE.DoubleSide,
   });
   addSwimWiggleToMaterial(sharedFishMaterial);

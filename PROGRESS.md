@@ -81,7 +81,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 ### Phase 8 — Salmon pond makeover
 - [x] 8.1 Clean turquoise pond, top-down camera, screen = pond
 - [x] 8.2 Hidden controls, toggled with C
-- [ ] 8.3 Salmon instead of koi
+- [x] 8.3 Salmon instead of koi
 - [ ] 8.4 Mood tuning for the new pond
 
 ## Log
@@ -136,6 +136,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 7.6 — fish rebuilt in code as ONE merged mesh: shaped body with belly/patch brightness, forked tail, dorsal + pectoral fins, eyes; grey vertex colors x koi-palette instance colors; DoubleSide material — d40862e. No GLB: the project has no model file; swapping later only touches createFishGeometry().
 - step 8.1 — removed environment.js/caustics.js (floor, rocks, seaweed, caustics, shafts); turquoise gradient + fog 0.01; OrbitControls removed, fixed top-down camera at y=34; pond x/z computed from camera frustum at the surface and updated on resize; boundaryMargin 3.5
 - step 8.2 — all debug UI (lil-gui, stats, audio meters) hidden by default; C toggles via setControlsVisible(); fading "press C" hint
+- step 8.3 — salmon: longer slim compressed body (nose 1.35 .. tail -2.3), pointed snout, adipose fin, moderate fork, countershading + speckles + silvery side band, metalness 0.25; salmon palette; skewed sizes 0.55–1.5; wavelength 3.8
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.
