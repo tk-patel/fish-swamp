@@ -52,7 +52,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 5.1 Mood object
 - [x] 5.2 Fake input (sliders/keys)
 - [x] 5.3 Mapping design (silence / calm / chaos)
-- [ ] 5.4 Flee force
+- [x] 5.4 Flee force
 - [ ] 5.5 Smoothing transitions
 - [ ] 5.6 Swim animation follows mood
 
@@ -115,6 +115,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 5.1 — `src/mood.js`: moodState { energy, chaos } + pure moodToFlockWeights(); main applies each frame — a5d9879
 - step 5.2 — Mood lil-gui folder + keys 1/2/3 and moodPresets silence/calm/chaos — d20dbd6
 - step 5.3 — moodAnchors table + smoothstep blends; fleeWeight on flockSettings (used in 5.4) — 7c67ebc
+- step 5.4 — jittering threat point + flee steering scaled by fleeWeight — (commit pending)
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.

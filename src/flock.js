@@ -85,6 +85,7 @@ const separationDelta = new THREE.Vector3();
 const boidSteering = new THREE.Vector3();
 const alignmentAverage = new THREE.Vector3();
 const cohesionCenter = new THREE.Vector3();
+const fleeAway = new THREE.Vector3();
 const wanderOffset = new THREE.Vector3();
 const wanderSphereCenter = new THREE.Vector3();
 const wanderPoint = new THREE.Vector3();
@@ -342,6 +343,28 @@ export function createFlock(count, tankSize) {
 
   let watchFishIndex = 0;
 
+  // Step 5.4: invisible "predator" wanders near the tank center so scatter is not
+  // a perfect radial burst from (0,0,0). Fish steer away when fleeWeight > 0.
+  const threatPoint = new THREE.Vector3(
+    (Math.random() - 0.5) * 4,
+    (Math.random() - 0.5) * 2,
+    (Math.random() - 0.5) * 3,
+  );
+  const threatJitterRadius = 9;
+  const threatDriftSpeed = 4.5;
+
+  function jitterThreatPoint(deltaSeconds) {
+    const step = threatDriftSpeed * deltaSeconds;
+    threatPoint.x += (Math.random() - 0.5) * 2 * step;
+    threatPoint.y += (Math.random() - 0.5) * 2 * step;
+    threatPoint.z += (Math.random() - 0.5) * 2 * step;
+    const distSq = threatPoint.lengthSq();
+    const maxDistSq = threatJitterRadius * threatJitterRadius;
+    if (distSq > maxDistSq) {
+      threatPoint.multiplyScalar(threatJitterRadius / Math.sqrt(distSq));
+    }
+  }
+
   function cycleWatchFish() {
     watchFishIndex = (watchFishIndex + 1) % count;
   }
@@ -349,6 +372,8 @@ export function createFlock(count, tankSize) {
   function update(deltaSeconds) {
     const wanderNudge = wanderJitter * Math.sqrt(deltaSeconds);
     const turnBlend = 1 - Math.exp(-turnRate * deltaSeconds);
+
+    jitterThreatPoint(deltaSeconds);
 
     for (let i = 0; i < count; i++) {
       const pi = i * 3;
@@ -403,6 +428,15 @@ export function createFlock(count, tankSize) {
         if (desiredVelocity.lengthSq() > 1e-8) {
           desiredVelocity.normalize().multiplyScalar(maxSpeed);
           addSteerTowardDesired(desiredVelocity, flockSettings.cohesionWeight);
+        }
+      }
+
+      const fleeWeight = flockSettings.fleeWeight;
+      if (fleeWeight > 0.001) {
+        fleeAway.set(px, py, pz).sub(threatPoint);
+        if (fleeAway.lengthSq() > 1e-8) {
+          desiredVelocity.copy(fleeAway).normalize().multiplyScalar(maxSpeed);
+          addSteerTowardDesired(desiredVelocity, fleeWeight);
         }
       }
 
