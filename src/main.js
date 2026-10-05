@@ -2,9 +2,6 @@
 // (scene, camera, renderer) and runs the render loop.
 
 import * as THREE from 'three';
-// OrbitControls is an "addon": it ships inside the three package but is not
-// part of the core THREE object, so we import it from 'three/addons/...'.
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
 import {
@@ -24,9 +21,7 @@ import {
   updateSmoothedAudioMood,
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
-import { createLightShafts } from './caustics.js';
-import { createPondEnvironment } from './environment.js';
-import { applyPondFog, applyWaterGradientBackground, createPondSize } from './pond.js';
+import { applyPondFog, applyWaterGradientBackground, computePondSizeFromCamera } from './pond.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
 import GUI from 'lil-gui';
@@ -38,37 +33,39 @@ import GUI from 'lil-gui';
 // ---------------------------------------------------------------------------
 const scene = new THREE.Scene();
 
-// Step 7.1 — gradient water behind the pond + light fog (see pond.js).
+// Step 7.1 / 8.1 — bright turquoise gradient + light fog (see pond.js).
 applyWaterGradientBackground(scene);
-applyPondFog(scene, 0.008);
+applyPondFog(scene, 0.01);
 
 // ---------------------------------------------------------------------------
 // 2. CAMERA - the "eye". PerspectiveCamera behaves like a real camera or your
 //    eye: things farther away look smaller.
 //
 //    Arguments:
-//      fov    (50)  - vertical field of view in degrees. Bigger = wider lens.
+//      fov    (45)  - vertical field of view in degrees. Bigger = wider lens.
 //      aspect       - width / height of the canvas. If this is wrong the
 //                     picture looks stretched (resize handler below, step 0.4).
 //      near   (0.1) - anything closer than this to the camera is not drawn.
 //      far  (1000)  - anything farther than this is not drawn.
 // ---------------------------------------------------------------------------
 const camera = new THREE.PerspectiveCamera(
-  50,
+  45,
   window.innerWidth / window.innerHeight,
   0.1,
   1000,
 );
-// By default the camera sits at (0, 0, 0) looking down the -Z axis.
-// Our tank will be a box about 40 x 20 x 30 units centered on the origin, so
-// we back the camera up along +Z (towards us) and lift it a little (+Y)
-// to see all of it. OrbitControls (below) looks at the origin by default.
+// Step 8.1 — the camera is FIXED. It sits straight above the middle of the
+// pond at y = 34 and looks straight down, so the screen shows a top-down map
+// of the water. There are no camera controls any more: the view cannot be
+// moved or zoomed.
 //
-// Pond view: we float above the water and look down at an angle, like
-// leaning over the edge of a shallow pond. The target (0, -3, 0) is the
-// middle of the water column, so the floor and the fish are both in frame.
-camera.position.set(0, 24, 30);
-camera.lookAt(0, -3, 0);
+// Straight-down note: the camera's default "up" is +Y, but a camera looking
+// down -Y cannot use "up" = +Y to decide which way is up on screen (the two
+// point along the same line). We set "up" to world -Z instead, so the top of
+// the screen is the far (+Z) end of the pond. Then lookAt locks the gaze.
+camera.position.set(0, 34, 0);
+camera.up.set(0, 0, -1);
+camera.lookAt(0, 0, 0);
 
 // ---------------------------------------------------------------------------
 // 3. RENDERER - the "photographer". It takes the scene + camera and paints
@@ -151,32 +148,17 @@ micEnableButton.addEventListener('click', async () => {
 //      camera still thinks it is the old shape, the cube looks stretched.
 //      Changing camera.aspect does nothing by itself; we must call
 //      updateProjectionMatrix() so the matrix is recalculated.
+//
+// Step 8.1 — the swim area is derived from the camera view, so a resize also
+// changes how much water is visible. After updating the aspect we recompute
+// the pond size and hand it to the flock, so the fish use exactly the screen.
 // ---------------------------------------------------------------------------
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  flock.setPondSize(computePondSizeFromCamera(camera));
 });
-
-// ---------------------------------------------------------------------------
-// ORBIT CONTROLS - lets you move the camera with the mouse:
-//   drag = orbit around the target, scroll = zoom, right-drag = pan.
-// "Orbit" means the camera moves on a sphere around a target point
-// (by default the origin, (0, 0, 0), the center of our tank) and always looks at it.
-//
-// Damping adds inertia: after you let go the camera glides to a stop
-// instead of halting instantly. It feels much smoother, but it only works
-// if we call controls.update() every frame (see animate()).
-// ---------------------------------------------------------------------------
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.05; // smaller = longer glide
-controls.target.set(0, -3, 0);
-controls.minPolarAngle = 0.1;
-controls.maxPolarAngle = 1.35; // stop just before the camera drops to water level
-controls.minDistance = 14;
-controls.maxDistance = 75;
-controls.enablePan = true;
 
 // ---------------------------------------------------------------------------
 // UNDERWATER MOOD, part 2: lights
@@ -186,8 +168,9 @@ controls.enablePan = true;
 // 1. HemisphereLight = soft "ambient" light from the whole sky dome.
 //    You give it a SKY color (used by surfaces facing up) and a GROUND color
 //    (used by surfaces facing down); surfaces facing sideways get a blend.
-//    Underwater, light comes down from the bright surface, and the deep
-//    below is dark and blue-green, so: pale cyan on top, dark teal below.
+//    From above, light comes down from the bright turquoise surface, and the
+//    water below bounces that same turquoise back up, so: pale cyan on top,
+//    turquoise below (no sandy or plant-green floor any more, step 8.1).
 //    It has no direction and casts no shadows, so it gently fills in the
 //    areas the sun doesn't reach (no pitch-black undersides).
 //
@@ -198,7 +181,7 @@ controls.enablePan = true;
 //    since light is scattered underwater.
 // ---------------------------------------------------------------------------
 const skyColor = 0xcff3ff; // light from above
-const groundColor = 0x3a5a48; // light bounced up from the sandy, plant-green floor
+const groundColor = 0x2a8f96; // light bounced up from the turquoise water below
 const hemisphereLight = new THREE.HemisphereLight(skyColor, groundColor, 1.5);
 scene.add(hemisphereLight);
 
@@ -213,19 +196,14 @@ scene.add(sunLight);
 const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 160;
 
 // ---------------------------------------------------------------------------
-// POND (phase 7) — a fixed, shallow box of water (see pond.js).
-// Soft boundaries (step 1.8) turn fish back near the invisible banks, the
-// surface and the floor.
+// POND (phase 7, reshaped in 8.1) — a shallow column of water whose x/z size
+// is derived from what the camera can see (see pond.js). Soft boundaries
+// (step 1.8) turn fish back near the invisible banks, the surface and the
+// bottom, so the screen edges act as the pond banks.
 // ---------------------------------------------------------------------------
-// Step 7.2 — sand floor, rocks and swaying plants (see environment.js).
-const pondEnvironment = createPondEnvironment();
-scene.add(pondEnvironment.group);
-
-// Step 7.3 — see-through light beams from the surface (caustics live in the floor material).
-const lightShafts = createLightShafts();
-scene.add(lightShafts.group);
-
-const pondSize = createPondSize();
+// Computed AFTER the camera position and aspect are set, so the frustum math
+// sees the final view. The resize handler recomputes it on every window change.
+const pondSize = computePondSizeFromCamera(camera);
 const flock = createFlock(fishCount, pondSize);
 scene.add(flock.mesh);
 
@@ -386,7 +364,6 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
-let elapsedSeconds = 0; // total running time, drives plant sway
 let framesSinceStatsUpdate = 0;
 let secondsSinceStatsUpdate = 0;
 
@@ -421,9 +398,6 @@ function animate() {
   // Always move things as `speed (units per second) * deltaSeconds`
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
-  elapsedSeconds += deltaSeconds;
-  pondEnvironment.update(elapsedSeconds);
-  lightShafts.update(elapsedSeconds);
 
   if (isMicrophoneAnalysisReady()) {
     const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
@@ -468,10 +442,6 @@ function animate() {
   fishWaveSettings.moodSpeedMul = swimMoodToSpeedMultiplier(smoothedSwimMood.uMood);
 
   flock.update(deltaSeconds);
-
-  // Let OrbitControls apply the damping glide and move the camera.
-  // Must happen before render so this frame uses the new camera position.
-  controls.update();
 
   // Take the picture: draw `scene` as seen by `camera`.
   renderer.render(scene, camera);

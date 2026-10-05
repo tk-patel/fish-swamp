@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { createFishInstancedMesh, fishWaveSettings } from './fish.js';
 
-const boundaryMargin = 5; // sideways: start turning back 5 units from the bank
+const boundaryMargin = 3.5; // sideways: start turning back 3.5 units from the bank
 // Up/down: the pond is only ~6 deep, so the soft zone at the surface and floor is smaller.
 const verticalBoundaryMargin = 1.5;
 // Shallow water: fish mostly cruise sideways. Each second vertical speed is

@@ -79,7 +79,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [ ] 7.8 Deploy
 
 ### Phase 8 — Salmon pond makeover
-- [ ] 8.1 Clean turquoise pond, top-down camera, screen = pond
+- [x] 8.1 Clean turquoise pond, top-down camera, screen = pond
 - [ ] 8.2 Hidden controls, toggled with C
 - [ ] 8.3 Salmon instead of koi
 - [ ] 8.4 Mood tuning for the new pond
@@ -134,6 +134,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 7.2 — `src/environment.js`: dune floor (sine heights + vertex colors), 12 low-poly rocks + pebbles (noise-displaced icosahedrons, seeded random), ~330 seaweed blades as one InstancedMesh with a vertex-shader sway — 448718a
 - step 7.3 — `src/caustics.js`: procedural caustic pattern added in the fragment shader of floor and rocks; 9 additive-blended light-shaft cones — 59c1576
 - step 7.6 — fish rebuilt in code as ONE merged mesh: shaped body with belly/patch brightness, forked tail, dorsal + pectoral fins, eyes; grey vertex colors x koi-palette instance colors; DoubleSide material — d40862e. No GLB: the project has no model file; swapping later only touches createFishGeometry().
+- step 8.1 — removed environment.js/caustics.js (floor, rocks, seaweed, caustics, shafts); turquoise gradient + fog 0.01; OrbitControls removed, fixed top-down camera at y=34; pond x/z computed from camera frustum at the surface and updated on resize; boundaryMargin 3.5
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.
