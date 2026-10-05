@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 6.4 (next up) — finished 6.3
-**Last updated:** 2026-10-04 (finished 6.3)
+**Current step:** 6.5 (next up) — finished 6.4
+**Last updated:** 2026-10-04 (finished 6.4)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -60,7 +60,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 6.1 Start screen and permission
 - [x] 6.2 AudioContext and AnalyserNode
 - [x] 6.3 Volume (RMS)
-- [ ] 6.4 Noise-floor calibration
+- [x] 6.4 Noise-floor calibration
 - [ ] 6.5 Volatility
 - [ ] 6.6 Spectral flux
 - [ ] 6.7 Combine into energy and chaos
@@ -121,6 +121,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 6.1 — mic overlay + getUserMedia (raw audio constraints); deny/skip paths; fish keep running — 35f4d26
 - step 6.2 — AudioContext + AnalyserNode; per-frame sampleMicrophoneAnalysis; console debug peaks — 2f2120e
 - step 6.3 — RMS from time-domain bytes; on-screen volume bar — 87fbcf7
+- step 6.4 — 1 s noise floor + normalize to 0..1; R to recalibrate — (commit pending)
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.

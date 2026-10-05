@@ -34,6 +34,18 @@ let frequencyBytes = null;
 // Step 6.3: one loudness number from the waveform (updated each sampleMicrophoneAnalysis).
 let latestRms = 0;
 
+// Step 6.4: subtract room hum (floor) and map to 0..1 using a fixed "very loud" ceiling.
+const noiseFloorCalibrationSeconds = 1;
+// Typical shout RMS in byte-waveform form; tuned later in 6.10 if needed.
+const loudnessCeilingRms = 0.22;
+
+let noiseFloorRms = 0;
+let normalizedLoudness = 0;
+let isCalibratingNoiseFloor = false;
+let calibrationElapsedSeconds = 0;
+let calibrationRmsSum = 0;
+let calibrationSampleCount = 0;
+
 export function getMicrophoneStream() {
   return microphoneStream;
 }
@@ -45,6 +57,66 @@ export function isMicrophoneAnalysisReady() {
 /** Root-mean-square loudness from the last sample (0 = silence, ~0.1+ when speaking). */
 export function getMicrophoneRms() {
   return latestRms;
+}
+
+/** Calibrated loudness in 0..1 (quiet room ≈ 0 after floor sampling). */
+export function getNormalizedLoudness() {
+  return normalizedLoudness;
+}
+
+export function isNoiseFloorCalibrating() {
+  return isCalibratingNoiseFloor;
+}
+
+export function getNoiseFloorRms() {
+  return noiseFloorRms;
+}
+
+function clamp01(value) {
+  return Math.min(1, Math.max(0, value));
+}
+
+function normalizeRmsToLoudness(rms) {
+  const span = loudnessCeilingRms - noiseFloorRms;
+  if (span <= 0.00001) {
+    return 0;
+  }
+  return clamp01((rms - noiseFloorRms) / span);
+}
+
+/** Sample ~1 s of ambient RMS right after the mic starts (stay quiet). */
+export function beginNoiseFloorCalibration() {
+  isCalibratingNoiseFloor = true;
+  calibrationElapsedSeconds = 0;
+  calibrationRmsSum = 0;
+  calibrationSampleCount = 0;
+  normalizedLoudness = 0;
+}
+
+/** Call once per frame after sampleMicrophoneAnalysis (pass animation delta time). */
+export function updateNoiseFloorCalibration(deltaSeconds) {
+  if (!isCalibratingNoiseFloor) {
+    return;
+  }
+
+  calibrationElapsedSeconds += deltaSeconds;
+  calibrationRmsSum += latestRms;
+  calibrationSampleCount += 1;
+
+  if (calibrationElapsedSeconds >= noiseFloorCalibrationSeconds) {
+    noiseFloorRms =
+      calibrationSampleCount > 0 ? calibrationRmsSum / calibrationSampleCount : latestRms;
+    isCalibratingNoiseFloor = false;
+    normalizedLoudness = normalizeRmsToLoudness(latestRms);
+  }
+}
+
+/** Press R during the app to re-measure ambient noise (stay quiet for 1 s). */
+export function recalibrateNoiseFloor() {
+  if (!analyserNode) {
+    return;
+  }
+  beginNoiseFloorCalibration();
 }
 
 /**
@@ -113,6 +185,8 @@ export async function startMicrophoneAnalysis(mediaStream = microphoneStream) {
     // Frequency bins: fftSize/2 bins from low pitch to high (also 0..255 energy).
     frequencyBytes = new Uint8Array(analyserNode.frequencyBinCount);
 
+    beginNoiseFloorCalibration();
+
     return { ok: true };
   } catch (error) {
     analyserNode = null;
@@ -136,6 +210,13 @@ export function sampleMicrophoneAnalysis(timeDomainOut, frequencyOut) {
   analyserNode.getByteTimeDomainData(timeDomainOut);
   analyserNode.getByteFrequencyData(frequencyOut);
   latestRms = computeRmsFromByteTimeDomain(timeDomainOut);
+
+  if (isCalibratingNoiseFloor) {
+    normalizedLoudness = 0;
+  } else {
+    normalizedLoudness = normalizeRmsToLoudness(latestRms);
+  }
+
   return true;
 }
 

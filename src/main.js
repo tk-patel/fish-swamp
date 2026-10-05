@@ -9,11 +9,14 @@ import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
 import {
   getMicrophoneAnalysisBuffers,
-  getMicrophoneRms,
+  getNormalizedLoudness,
   isMicrophoneAnalysisReady,
+  isNoiseFloorCalibrating,
   requestMicrophonePermission,
+  recalibrateNoiseFloor,
   sampleMicrophoneAnalysis,
   startMicrophoneAnalysis,
+  updateNoiseFloorCalibration,
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
@@ -297,22 +300,20 @@ statsBox.style.cssText =
 document.body.appendChild(statsBox);
 
 // ---------------------------------------------------------------------------
-// VOLUME BAR (step 6.3) — RMS loudness from the mic waveform.
-// Shown only after analysis starts; fill width tracks getMicrophoneRms().
+// VOLUME BAR (steps 6.3–6.4) — calibrated loudness 0..1 after noise-floor sampling.
 // ---------------------------------------------------------------------------
 const volumeMeter = document.createElement('div');
 volumeMeter.style.cssText =
   'position:fixed;left:8px;bottom:72px;display:none;width:160px;padding:6px 8px;' +
   'background:rgba(0,0,0,0.55);color:#cfefff;font:12px/1.4 monospace;pointer-events:none;';
 volumeMeter.innerHTML =
-  '<div style="margin-bottom:4px">volume (RMS)</div>' +
+  '<div id="volume-meter-label" style="margin-bottom:4px">loudness</div>' +
   '<div style="height:10px;background:rgba(255,255,255,0.12);border-radius:2px;overflow:hidden">' +
   '<div id="volume-bar-fill" style="height:100%;width:0%;background:#3db8d4;border-radius:2px"></div>' +
   '</div>';
 document.body.appendChild(volumeMeter);
+const volumeMeterLabel = volumeMeter.querySelector('#volume-meter-label');
 const volumeBarFill = volumeMeter.querySelector('#volume-bar-fill');
-// Raw RMS is often ~0.01 quiet / ~0.15 loud; scale so normal speech fills most of the bar.
-const volumeBarRmsScale = 6;
 
 // ---------------------------------------------------------------------------
 // TUNING PANEL (step 2.6) - lil-gui. `gui.add(object, 'property', min, max,
@@ -381,6 +382,8 @@ window.addEventListener('keydown', (event) => {
     setMoodPreset('calm');
   } else if (event.key === '3') {
     setMoodPreset('chaos');
+  } else if ((event.key === 'r' || event.key === 'R') && isMicrophoneAnalysisReady()) {
+    recalibrateNoiseFloor();
   }
 });
 
@@ -434,9 +437,15 @@ function animate() {
   if (isMicrophoneAnalysisReady()) {
     const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
     sampleMicrophoneAnalysis(timeDomain, frequency);
+    updateNoiseFloorCalibration(deltaSeconds);
     volumeMeter.style.display = 'block';
-    const barWidthPercent = Math.min(100, getMicrophoneRms() * volumeBarRmsScale * 100);
-    volumeBarFill.style.width = `${barWidthPercent}%`;
+    if (isNoiseFloorCalibrating()) {
+      volumeMeterLabel.textContent = 'calibrating… (stay quiet, key R)';
+      volumeBarFill.style.width = '0%';
+    } else {
+      volumeMeterLabel.textContent = 'loudness (0–1)';
+      volumeBarFill.style.width = `${getNormalizedLoudness() * 100}%`;
+    }
   }
 
   // Let OrbitControls apply the damping glide and move the camera.
