@@ -124,7 +124,8 @@ export const moodFlockWeightKeys = [
 // Step 5.5: fast attack when chaos rises, slower release when calming down.
 export const moodWeightSmoothing = {
   attackRate: 14,
-  releaseRate: 2.2,
+  // Slower release so the school drifts apart gradually when calm fades.
+  releaseRate: 1.35,
 };
 
 const initialSmoothedWeights = moodToFlockWeights(0, 0);

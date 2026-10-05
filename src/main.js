@@ -8,6 +8,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
 import {
+  getCalmness,
   getLoudnessVolatility,
   getMicrophoneAnalysisBuffers,
   getNormalizedLoudness,
@@ -326,7 +327,7 @@ audioMeterPanel.innerHTML =
   audioMeterRow('loudness', 'audio-bar-loudness', '#3db8d4') +
   audioMeterRow('volatility', 'audio-bar-volatility', '#9fe6ff') +
   audioMeterRow('flux', 'audio-bar-flux', '#7fe0ff') +
-  audioMeterRow('energy', 'audio-bar-energy', '#5ce0a8') +
+  audioMeterRow('calm (school)', 'audio-bar-energy', '#5ce0a8') +
   audioMeterRow('chaos', 'audio-bar-chaos', '#ffb4a8');
 document.body.appendChild(audioMeterPanel);
 
@@ -501,7 +502,7 @@ function animate() {
       setAudioBar(audioBarFills.loudness, getNormalizedLoudness());
       setAudioBar(audioBarFills.volatility, getLoudnessVolatility() * 8);
       setAudioBar(audioBarFills.flux, getSpectralFlux());
-      setAudioBar(audioBarFills.energy, audioMood.energy);
+      setAudioBar(audioBarFills.energy, getCalmness());
       setAudioBar(audioBarFills.chaos, audioMood.chaos);
     }
   }

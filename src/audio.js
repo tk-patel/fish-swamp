@@ -21,10 +21,34 @@ export const audioMoodWeights = {
   energyChaosFadeEnd: 0.06,
 };
 
-// Step 6.8 — fast rise, slower fall (same idea as mood flock weights).
-export const audioSignalSmoothing = {
-  attackRate: 14,
-  releaseRate: 2.8,
+// Step 6.8 — chaos snaps up fast; calm (schooling) eases in and fades out slowly.
+export const audioChaosSmoothing = {
+  attackRate: 22,
+  releaseRate: 2.5,
+};
+
+export const audioCalmSmoothing = {
+  attackRate: 5,
+  releaseRate: 0.85,
+};
+
+/**
+ * Sustained steady sound (hum, soft voice) builds calmness over time.
+ * Fish school while calmness is high; it decays slowly after sound stops.
+ */
+export const calmBuildup = {
+  riseRate: 0.32,
+  /** When quiet after a calm moment — slow return to wandering. */
+  silenceFallRate: 0.09,
+  /** Sound is present but not steady enough to build (e.g. choppy noise). */
+  uncalmFallRate: 0.14,
+  loudnessMin: 0.07,
+  loudnessMax: 0.82,
+  maxVolatility: 0.065,
+  maxFlux: 0.38,
+  /** Sudden scatter drains accumulated calm quickly. */
+  chaosPunchThreshold: 0.22,
+  chaosCalmnessDrain: 4.2,
 };
 
 const analyserFftSize = 2048;
@@ -59,6 +83,8 @@ let calibrationSampleCount = 0;
 
 let loudnessVolatility = 0;
 let spectralFlux = 0;
+let calmness = 0;
+let instantRawChaos = 0;
 let targetEnergy = 0;
 let targetChaos = 0;
 let smoothedEnergy = 0;
@@ -88,7 +114,12 @@ export function getSpectralFlux() {
   return spectralFlux;
 }
 
-/** Smoothed 0..1 values for mood.js (step 6.7–6.8). */
+/** Accumulated schooling calm (0..1), rises on steady hum/voice, falls slowly in silence. */
+export function getCalmness() {
+  return calmness;
+}
+
+/** Smoothed 0..1 values for mood.js (energy ≈ schooling calm, not raw volume). */
 export function getSmoothedAudioMood() {
   return { energy: smoothedEnergy, chaos: smoothedChaos };
 }
@@ -125,10 +156,48 @@ function resetAudioFeatureState() {
   previousFrequencyBytes = null;
   loudnessVolatility = 0;
   spectralFlux = 0;
+  calmness = 0;
+  instantRawChaos = 0;
   targetEnergy = 0;
   targetChaos = 0;
   smoothedEnergy = 0;
   smoothedChaos = 0;
+}
+
+function isSteadyCalmSound() {
+  const loudness = normalizedLoudness;
+  if (loudness < calmBuildup.loudnessMin || loudness > calmBuildup.loudnessMax) {
+    return false;
+  }
+  if (spectralFlux > calmBuildup.maxFlux) {
+    return false;
+  }
+  // Allow a little more wobble when louder (soothing voice vs pure hum).
+  const volatilityLimit = calmBuildup.maxVolatility + loudness * 0.06;
+  return loudnessVolatility <= volatilityLimit;
+}
+
+function updateCalmnessIntegrator(deltaSeconds) {
+  if (isCalibratingNoiseFloor) {
+    calmness = 0;
+    targetEnergy = 0;
+    return;
+  }
+
+  if (instantRawChaos >= calmBuildup.chaosPunchThreshold) {
+    calmness = Math.max(
+      0,
+      calmness - deltaSeconds * calmBuildup.chaosCalmnessDrain * (0.35 + instantRawChaos),
+    );
+  } else if (isSteadyCalmSound()) {
+    calmness = Math.min(1, calmness + calmBuildup.riseRate * deltaSeconds);
+  } else if (normalizedLoudness < calmBuildup.loudnessMin) {
+    calmness = Math.max(0, calmness - calmBuildup.silenceFallRate * deltaSeconds);
+  } else {
+    calmness = Math.max(0, calmness - calmBuildup.uncalmFallRate * deltaSeconds);
+  }
+
+  targetEnergy = calmness;
 }
 
 function pushLoudnessSample(loudness) {
@@ -186,18 +255,17 @@ function updateAudioTargets() {
   pushLoudnessSample(normalizedLoudness);
   loudnessVolatility = computeLoudnessVolatility();
 
-  targetEnergy = normalizedLoudness;
-
-  const rawChaos = clamp01(
+  instantRawChaos = clamp01(
     audioMoodWeights.volatilityWeight * loudnessVolatility +
       audioMoodWeights.fluxWeight * spectralFlux,
   );
 
-  // Quiet hiss should not scatter fish: fade chaos when energy is near zero.
-  const energyFade = smoothstep01(
-    targetEnergy / Math.max(audioMoodWeights.energyChaosFadeEnd, 0.0001),
+  // Need some sound (or recent calm) for chaos to matter — not room hiss alone.
+  const presence = Math.max(normalizedLoudness, calmness * 0.45);
+  const presenceFade = smoothstep01(
+    presence / Math.max(audioMoodWeights.energyChaosFadeEnd, 0.0001),
   );
-  targetChaos = rawChaos * energyFade;
+  targetChaos = instantRawChaos * presenceFade;
 }
 
 export function beginNoiseFloorCalibration() {
@@ -314,17 +382,19 @@ export function sampleMicrophoneAnalysis(timeDomainOut, frequencyOut) {
 
 /** Step 6.8 — smooth energy/chaos after targets update (call once per frame). */
 export function updateSmoothedAudioMood(deltaSeconds) {
+  updateCalmnessIntegrator(deltaSeconds);
+
   smoothedEnergy = smoothValueWithAttackRelease(
     smoothedEnergy,
     targetEnergy,
     deltaSeconds,
-    audioSignalSmoothing,
+    audioCalmSmoothing,
   );
   smoothedChaos = smoothValueWithAttackRelease(
     smoothedChaos,
     targetChaos,
     deltaSeconds,
-    audioSignalSmoothing,
+    audioChaosSmoothing,
   );
 }
 

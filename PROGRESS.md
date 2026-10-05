@@ -144,8 +144,13 @@ Audio (`src/audio.js`):
 - `audioMoodWeights.volatilityWeight`: **5.5**
 - `audioMoodWeights.fluxWeight`: **1.0**
 - `audioMoodWeights.energyChaosFadeEnd`: **0.06**
-- `audioSignalSmoothing`: attack **14**, release **2.8**
+- `calmBuildup`: rise **0.32**/s, silence fall **0.09**/s, chaos drain **4.2**
+- `audioCalmSmoothing`: attack **5**, release **0.85** (schooling eases in/out)
+- `audioChaosSmoothing`: attack **22**, release **2.5** (scatter snaps fast)
+- Flock mood weight release (`mood.js`): **1.35**
 - Volatility UI scale in main: **×8** on std-dev for bar display
+
+**Behavior:** steady hum / soft voice builds **calmness** → fish school and stay tight; silence decays calm slowly → loose flock then wander; clap/shout spikes **chaos** and drains calm → scatter.
 
 Mood flock anchors unchanged from step 5.3 (`mood.js` `moodAnchors`).
 
