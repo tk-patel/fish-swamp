@@ -8,8 +8,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { fishWaveUniforms, fishWaveSettings } from './fish.js';
 import { applyFlockPreset, createFlock, flockPresets, flockSettings } from './flock.js';
 import {
+  getLoudnessVolatility,
   getMicrophoneAnalysisBuffers,
   getNormalizedLoudness,
+  getSmoothedAudioMood,
+  getSpectralFlux,
   isMicrophoneAnalysisReady,
   isNoiseFloorCalibrating,
   requestMicrophonePermission,
@@ -17,6 +20,7 @@ import {
   sampleMicrophoneAnalysis,
   startMicrophoneAnalysis,
   updateNoiseFloorCalibration,
+  updateSmoothedAudioMood,
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
@@ -300,20 +304,45 @@ statsBox.style.cssText =
 document.body.appendChild(statsBox);
 
 // ---------------------------------------------------------------------------
-// VOLUME BAR (steps 6.3–6.4) — calibrated loudness 0..1 after noise-floor sampling.
+// AUDIO METERS (steps 6.3–6.7) — loudness, volatility, flux, energy, chaos.
 // ---------------------------------------------------------------------------
-const volumeMeter = document.createElement('div');
-volumeMeter.style.cssText =
-  'position:fixed;left:8px;bottom:72px;display:none;width:160px;padding:6px 8px;' +
+const audioMeterPanel = document.createElement('div');
+audioMeterPanel.style.cssText =
+  'position:fixed;left:8px;bottom:72px;display:none;width:168px;padding:6px 8px;' +
   'background:rgba(0,0,0,0.55);color:#cfefff;font:12px/1.4 monospace;pointer-events:none;';
-volumeMeter.innerHTML =
-  '<div id="volume-meter-label" style="margin-bottom:4px">loudness</div>' +
-  '<div style="height:10px;background:rgba(255,255,255,0.12);border-radius:2px;overflow:hidden">' +
-  '<div id="volume-bar-fill" style="height:100%;width:0%;background:#3db8d4;border-radius:2px"></div>' +
-  '</div>';
-document.body.appendChild(volumeMeter);
-const volumeMeterLabel = volumeMeter.querySelector('#volume-meter-label');
-const volumeBarFill = volumeMeter.querySelector('#volume-bar-fill');
+
+function audioMeterRow(label, fillId, color) {
+  return (
+    `<div style="margin-top:5px">` +
+    `<div style="margin-bottom:2px;font-size:11px">${label}</div>` +
+    `<div style="height:8px;background:rgba(255,255,255,0.12);border-radius:2px;overflow:hidden">` +
+    `<div id="${fillId}" style="height:100%;width:0%;background:${color};border-radius:2px"></div>` +
+    `</div></div>`
+  );
+}
+
+audioMeterPanel.innerHTML =
+  '<div id="audio-meter-status" style="font-size:11px;margin-bottom:2px">audio</div>' +
+  audioMeterRow('loudness', 'audio-bar-loudness', '#3db8d4') +
+  audioMeterRow('volatility', 'audio-bar-volatility', '#9fe6ff') +
+  audioMeterRow('flux', 'audio-bar-flux', '#7fe0ff') +
+  audioMeterRow('energy', 'audio-bar-energy', '#5ce0a8') +
+  audioMeterRow('chaos', 'audio-bar-chaos', '#ffb4a8');
+document.body.appendChild(audioMeterPanel);
+
+const audioMeterStatus = audioMeterPanel.querySelector('#audio-meter-status');
+const audioBarFills = {
+  loudness: audioMeterPanel.querySelector('#audio-bar-loudness'),
+  volatility: audioMeterPanel.querySelector('#audio-bar-volatility'),
+  flux: audioMeterPanel.querySelector('#audio-bar-flux'),
+  energy: audioMeterPanel.querySelector('#audio-bar-energy'),
+  chaos: audioMeterPanel.querySelector('#audio-bar-chaos'),
+};
+
+function setAudioBar(fillElement, value01) {
+  const widthPercent = Math.min(100, Math.max(0, value01 * 100));
+  fillElement.style.width = `${widthPercent}%`;
+}
 
 // ---------------------------------------------------------------------------
 // TUNING PANEL (step 2.6) - lil-gui. `gui.add(object, 'property', min, max,
@@ -351,10 +380,29 @@ flockFolder.add(presetActions, 'idle').name('preset: idle');
 flockFolder.add(presetActions, 'tightSchool').name('preset: tight school');
 flockFolder.add(presetActions, 'scatter').name('preset: scatter');
 
-// Step 5.2 — drive mood before it becomes microphone input (phase 6).
+// Step 5.2 / 6.9 — mood sliders; when manual mode is off, mic drives moodState.
 const moodFolder = gui.addFolder('Mood');
+const moodInputMode = { manualMode: false };
 const moodEnergyController = moodFolder.add(moodState, 'energy', 0, 1, 0.01).name('energy');
 const moodChaosController = moodFolder.add(moodState, 'chaos', 0, 1, 0.01).name('chaos');
+
+function setMoodManualMode(enabled) {
+  moodInputMode.manualMode = Boolean(enabled);
+  if (moodInputMode.manualMode) {
+    moodEnergyController.enable();
+    moodChaosController.enable();
+  } else {
+    moodEnergyController.disable();
+    moodChaosController.disable();
+  }
+}
+
+const manualMoodController = moodFolder
+  .add(moodInputMode, 'manualMode')
+  .name('manual mood (M)')
+  .onChange((value) => setMoodManualMode(value));
+
+setMoodManualMode(false);
 
 function refreshMoodGuiDisplays() {
   moodEnergyController.updateDisplay();
@@ -384,6 +432,9 @@ window.addEventListener('keydown', (event) => {
     setMoodPreset('chaos');
   } else if ((event.key === 'r' || event.key === 'R') && isMicrophoneAnalysisReady()) {
     recalibrateNoiseFloor();
+  } else if (event.key === 'm' || event.key === 'M') {
+    setMoodManualMode(!moodInputMode.manualMode);
+    manualMoodController.updateDisplay();
   }
 });
 
@@ -422,6 +473,39 @@ function animate() {
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
 
+  if (isMicrophoneAnalysisReady()) {
+    const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
+    sampleMicrophoneAnalysis(timeDomain, frequency);
+    updateNoiseFloorCalibration(deltaSeconds);
+    updateSmoothedAudioMood(deltaSeconds);
+
+    if (!moodInputMode.manualMode && !isNoiseFloorCalibrating()) {
+      const audioMood = getSmoothedAudioMood();
+      moodState.energy = audioMood.energy;
+      moodState.chaos = audioMood.chaos;
+      moodEnergyController.updateDisplay();
+      moodChaosController.updateDisplay();
+    }
+
+    audioMeterPanel.style.display = 'block';
+    if (isNoiseFloorCalibrating()) {
+      audioMeterStatus.textContent = 'calibrating… (quiet, R)';
+      setAudioBar(audioBarFills.loudness, 0);
+      setAudioBar(audioBarFills.volatility, 0);
+      setAudioBar(audioBarFills.flux, 0);
+      setAudioBar(audioBarFills.energy, 0);
+      setAudioBar(audioBarFills.chaos, 0);
+    } else {
+      audioMeterStatus.textContent = moodInputMode.manualMode ? 'mic (manual mood)' : 'mic → fish';
+      const audioMood = getSmoothedAudioMood();
+      setAudioBar(audioBarFills.loudness, getNormalizedLoudness());
+      setAudioBar(audioBarFills.volatility, getLoudnessVolatility() * 8);
+      setAudioBar(audioBarFills.flux, getSpectralFlux());
+      setAudioBar(audioBarFills.energy, audioMood.energy);
+      setAudioBar(audioBarFills.chaos, audioMood.chaos);
+    }
+  }
+
   // Step 5.1/5.5 — mood targets weights; smoothing avoids snaps (fast attack, slow release).
   const moodTargetWeights = moodToFlockWeights(moodState.energy, moodState.chaos);
   updateSmoothedFlockWeights(moodTargetWeights, deltaSeconds);
@@ -432,21 +516,6 @@ function animate() {
   fishWaveSettings.moodSpeedMul = swimMoodToSpeedMultiplier(smoothedSwimMood.uMood);
 
   flock.update(deltaSeconds);
-
-  // Step 6.2 — pull fresh time + frequency snapshots when the mic graph is running.
-  if (isMicrophoneAnalysisReady()) {
-    const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
-    sampleMicrophoneAnalysis(timeDomain, frequency);
-    updateNoiseFloorCalibration(deltaSeconds);
-    volumeMeter.style.display = 'block';
-    if (isNoiseFloorCalibrating()) {
-      volumeMeterLabel.textContent = 'calibrating… (stay quiet, key R)';
-      volumeBarFill.style.width = '0%';
-    } else {
-      volumeMeterLabel.textContent = 'loudness (0–1)';
-      volumeBarFill.style.width = `${getNormalizedLoudness() * 100}%`;
-    }
-  }
 
   // Let OrbitControls apply the damping glide and move the camera.
   // Must happen before render so this frame uses the new camera position.

@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 6.5 (next up) — finished 6.4
-**Last updated:** 2026-10-04 (finished 6.4)
+**Current step:** 7.x (optional polish) — Phase 6 complete
+**Last updated:** 2026-10-04 (finished 6.10)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -61,12 +61,12 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - [x] 6.2 AudioContext and AnalyserNode
 - [x] 6.3 Volume (RMS)
 - [x] 6.4 Noise-floor calibration
-- [ ] 6.5 Volatility
-- [ ] 6.6 Spectral flux
-- [ ] 6.7 Combine into energy and chaos
-- [ ] 6.8 Smooth audio signals
-- [ ] 6.9 Connect audio to mood
-- [ ] 6.10 Tuning session
+- [x] 6.5 Volatility
+- [x] 6.6 Spectral flux
+- [x] 6.7 Combine into energy and chaos
+- [x] 6.8 Smooth audio signals
+- [x] 6.9 Connect audio to mood
+- [x] 6.10 Tuning session
 
 ### Phase 7 — Polish (optional)
 - [ ] 7.1 Gradient water and fog
@@ -122,6 +122,7 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 6.2 — AudioContext + AnalyserNode; per-frame sampleMicrophoneAnalysis; console debug peaks — 2f2120e
 - step 6.3 — RMS from time-domain bytes; on-screen volume bar — 87fbcf7
 - step 6.4 — 1 s noise floor + normalize to 0..1; R to recalibrate — 8640241
+- step 6.5–6.10 — volatility/flux bars, energy+chaos, smooth + mic→mood, tuning constants — (commit pending)
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.
@@ -136,8 +137,19 @@ Test: `npm run dev` then open `?fish=300`, `?fish=600`, `?fish=1000` and read bo
 
 Why no grid yet: at 300 fish the sim should stay smooth on a typical laptop; only add a spatial hash if your 1000-fish test drops below ~50 FPS. A grid buckets fish into cells so each fish only checks nearby buckets instead of all n.
 
-## Final tuned values
-(Filled in at step 6.10: loudness ceiling, volatility weight, flux weight, attack/release rates, boid weights for each mood.)
+## Final tuned values (step 6.10)
+Audio (`src/audio.js`):
+- `loudnessCeilingRms`: **0.2**
+- `spectralFluxSumNormalizer`: **14000**
+- `audioMoodWeights.volatilityWeight`: **5.5**
+- `audioMoodWeights.fluxWeight`: **1.0**
+- `audioMoodWeights.energyChaosFadeEnd`: **0.06**
+- `audioSignalSmoothing`: attack **14**, release **2.8**
+- Volatility UI scale in main: **×8** on std-dev for bar display
+
+Mood flock anchors unchanged from step 5.3 (`mood.js` `moodAnchors`).
+
+**Sound test cheat sheet:** silence → wander; steady hum/speech → school (energy↑ chaos↓); clap/shout/desk tap → scatter (chaos↑). **R** = recalibrate noise floor (stay quiet 1 s). **M** = manual mood sliders. Keys **1/2/3** only when manual mode on.
 
 ## Questions / things I want to revisit
 (Owner adds items here; the agent answers them in a later step or on request.)

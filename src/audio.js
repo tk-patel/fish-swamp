@@ -4,47 +4,65 @@
 // ("user gesture"). That is why we show an overlay with a button instead of
 // calling getUserMedia on page load. HTTPS (or localhost) is also required.
 
-// Step 6.1: turn OFF the browser's audio "helpers" so later steps see real
-// loudness changes. If these stayed on, auto-gain would squash quiet/loud
-// differences and make the fish less responsive.
+import { smoothValueWithAttackRelease } from './mood.js';
+
+// Step 6.1: turn OFF the browser's "helpers" so later steps see real loudness.
 export const microphoneAudioConstraints = {
   echoCancellation: false,
   noiseSuppression: false,
   autoGainControl: false,
 };
 
-// Step 6.2: fftSize must be a power of two. The analyser keeps a rolling
-// buffer of that many time samples, then runs an FFT each time we ask for
-// frequency data. Larger = finer frequency detail, slightly more CPU.
+// Step 6.7 / 6.10 — how volatility + spectral flux become chaos (tuned in 6.10).
+export const audioMoodWeights = {
+  volatilityWeight: 5.5,
+  fluxWeight: 1.0,
+  /** Below this smoothed energy, chaos fades out (avoids noise-only scatter). */
+  energyChaosFadeEnd: 0.06,
+};
+
+// Step 6.8 — fast rise, slower fall (same idea as mood flock weights).
+export const audioSignalSmoothing = {
+  attackRate: 14,
+  releaseRate: 2.8,
+};
+
 const analyserFftSize = 2048;
+const noiseFloorCalibrationSeconds = 1;
+// Step 6.10 — loudness ceiling for normalize (RMS units).
+export const loudnessCeilingRms = 0.2;
 
-/** Active MediaStream after permission is granted; null until then. */
+// Step 6.5 — ring buffer of recent loudness for standard deviation.
+const volatilityWindowFrames = 60;
+const loudnessHistory = new Float32Array(volatilityWindowFrames);
+let loudnessHistoryWriteIndex = 0;
+let loudnessHistoryFilled = 0;
+
+// Step 6.6 — previous spectrum for per-bin positive differences.
+let previousFrequencyBytes = null;
+// Step 6.10 — scale raw flux sum (can be thousands) into ~0..1.
+const spectralFluxSumNormalizer = 14000;
+
 let microphoneStream = null;
-
-// Audio graph (step 6.2):  mic stream -> MediaStreamSource -> AnalyserNode
-// We do NOT connect the analyser to speakers (destination). We only *read*
-// numbers from it; playing the mic back would cause feedback.
 let audioContext = null;
 let analyserNode = null;
-
-// Reused every frame so we do not allocate new arrays 60+ times per second.
 let timeDomainBytes = null;
 let frequencyBytes = null;
 
-// Step 6.3: one loudness number from the waveform (updated each sampleMicrophoneAnalysis).
 let latestRms = 0;
-
-// Step 6.4: subtract room hum (floor) and map to 0..1 using a fixed "very loud" ceiling.
-const noiseFloorCalibrationSeconds = 1;
-// Typical shout RMS in byte-waveform form; tuned later in 6.10 if needed.
-const loudnessCeilingRms = 0.22;
-
 let noiseFloorRms = 0;
 let normalizedLoudness = 0;
 let isCalibratingNoiseFloor = false;
 let calibrationElapsedSeconds = 0;
 let calibrationRmsSum = 0;
 let calibrationSampleCount = 0;
+
+let loudnessVolatility = 0;
+let spectralFlux = 0;
+let targetEnergy = 0;
+let targetChaos = 0;
+let smoothedEnergy = 0;
+let smoothedChaos = 0;
 
 export function getMicrophoneStream() {
   return microphoneStream;
@@ -54,14 +72,25 @@ export function isMicrophoneAnalysisReady() {
   return analyserNode !== null;
 }
 
-/** Root-mean-square loudness from the last sample (0 = silence, ~0.1+ when speaking). */
 export function getMicrophoneRms() {
   return latestRms;
 }
 
-/** Calibrated loudness in 0..1 (quiet room ≈ 0 after floor sampling). */
 export function getNormalizedLoudness() {
   return normalizedLoudness;
+}
+
+export function getLoudnessVolatility() {
+  return loudnessVolatility;
+}
+
+export function getSpectralFlux() {
+  return spectralFlux;
+}
+
+/** Smoothed 0..1 values for mood.js (step 6.7–6.8). */
+export function getSmoothedAudioMood() {
+  return { energy: smoothedEnergy, chaos: smoothedChaos };
 }
 
 export function isNoiseFloorCalibrating() {
@@ -76,6 +105,11 @@ function clamp01(value) {
   return Math.min(1, Math.max(0, value));
 }
 
+function smoothstep01(t) {
+  const x = clamp01(t);
+  return x * x * (3 - 2 * x);
+}
+
 function normalizeRmsToLoudness(rms) {
   const span = loudnessCeilingRms - noiseFloorRms;
   if (span <= 0.00001) {
@@ -84,16 +118,97 @@ function normalizeRmsToLoudness(rms) {
   return clamp01((rms - noiseFloorRms) / span);
 }
 
-/** Sample ~1 s of ambient RMS right after the mic starts (stay quiet). */
+function resetAudioFeatureState() {
+  loudnessHistoryWriteIndex = 0;
+  loudnessHistoryFilled = 0;
+  loudnessHistory.fill(0);
+  previousFrequencyBytes = null;
+  loudnessVolatility = 0;
+  spectralFlux = 0;
+  targetEnergy = 0;
+  targetChaos = 0;
+  smoothedEnergy = 0;
+  smoothedChaos = 0;
+}
+
+function pushLoudnessSample(loudness) {
+  loudnessHistory[loudnessHistoryWriteIndex] = loudness;
+  loudnessHistoryWriteIndex = (loudnessHistoryWriteIndex + 1) % volatilityWindowFrames;
+  loudnessHistoryFilled = Math.min(loudnessHistoryFilled + 1, volatilityWindowFrames);
+}
+
+/** Standard deviation of the last ~60 loudness samples (step 6.5). */
+function computeLoudnessVolatility() {
+  if (loudnessHistoryFilled < 2) {
+    return 0;
+  }
+
+  let sum = 0;
+  for (let i = 0; i < loudnessHistoryFilled; i += 1) {
+    sum += loudnessHistory[i];
+  }
+  const mean = sum / loudnessHistoryFilled;
+
+  let varianceSum = 0;
+  for (let i = 0; i < loudnessHistoryFilled; i += 1) {
+    const delta = loudnessHistory[i] - mean;
+    varianceSum += delta * delta;
+  }
+  return Math.sqrt(varianceSum / loudnessHistoryFilled);
+}
+
+function computeSpectralFlux(frequencyOut) {
+  if (!previousFrequencyBytes) {
+    previousFrequencyBytes = new Uint8Array(frequencyOut.length);
+    previousFrequencyBytes.set(frequencyOut);
+    return 0;
+  }
+
+  let positiveDiffSum = 0;
+  for (let i = 0; i < frequencyOut.length; i += 1) {
+    const diff = frequencyOut[i] - previousFrequencyBytes[i];
+    if (diff > 0) {
+      positiveDiffSum += diff;
+    }
+    previousFrequencyBytes[i] = frequencyOut[i];
+  }
+
+  return clamp01(positiveDiffSum / spectralFluxSumNormalizer);
+}
+
+function updateAudioTargets() {
+  if (isCalibratingNoiseFloor) {
+    targetEnergy = 0;
+    targetChaos = 0;
+    return;
+  }
+
+  pushLoudnessSample(normalizedLoudness);
+  loudnessVolatility = computeLoudnessVolatility();
+
+  targetEnergy = normalizedLoudness;
+
+  const rawChaos = clamp01(
+    audioMoodWeights.volatilityWeight * loudnessVolatility +
+      audioMoodWeights.fluxWeight * spectralFlux,
+  );
+
+  // Quiet hiss should not scatter fish: fade chaos when energy is near zero.
+  const energyFade = smoothstep01(
+    targetEnergy / Math.max(audioMoodWeights.energyChaosFadeEnd, 0.0001),
+  );
+  targetChaos = rawChaos * energyFade;
+}
+
 export function beginNoiseFloorCalibration() {
   isCalibratingNoiseFloor = true;
   calibrationElapsedSeconds = 0;
   calibrationRmsSum = 0;
   calibrationSampleCount = 0;
   normalizedLoudness = 0;
+  resetAudioFeatureState();
 }
 
-/** Call once per frame after sampleMicrophoneAnalysis (pass animation delta time). */
 export function updateNoiseFloorCalibration(deltaSeconds) {
   if (!isCalibratingNoiseFloor) {
     return;
@@ -111,7 +226,6 @@ export function updateNoiseFloorCalibration(deltaSeconds) {
   }
 }
 
-/** Press R during the app to re-measure ambient noise (stay quiet for 1 s). */
 export function recalibrateNoiseFloor() {
   if (!analyserNode) {
     return;
@@ -119,25 +233,15 @@ export function recalibrateNoiseFloor() {
   beginNoiseFloorCalibration();
 }
 
-/**
- * RMS = "average energy" of the waveform (not just the loudest peak).
- * We convert each byte sample to roughly -1..1, square them, average, sqrt.
- * That reacts smoothly to sustained sound; a single spike matters less.
- */
 export function computeRmsFromByteTimeDomain(timeDomainBytes) {
   let sumSquares = 0;
   for (let i = 0; i < timeDomainBytes.length; i += 1) {
-    // 128 is the analyser's "zero" for silence in byte form.
     const normalizedSample = (timeDomainBytes[i] - 128) / 128;
     sumSquares += normalizedSample * normalizedSample;
   }
   return Math.sqrt(sumSquares / timeDomainBytes.length);
 }
 
-/**
- * Ask for microphone access (must be called from a click handler).
- * @returns {Promise<{ granted: true, stream: MediaStream } | { granted: false, error: DOMException | Error }>}
- */
 export async function requestMicrophonePermission() {
   if (!navigator.mediaDevices?.getUserMedia) {
     return {
@@ -157,11 +261,6 @@ export async function requestMicrophonePermission() {
   }
 }
 
-/**
- * Build the Web Audio graph for an already-granted MediaStream.
- * Call once after permission succeeds (still inside the user's click).
- * @returns {Promise<{ ok: true } | { ok: false, error: unknown }>}
- */
 export async function startMicrophoneAnalysis(mediaStream = microphoneStream) {
   if (!mediaStream) {
     return { ok: false, error: new Error('No microphone stream — enable the mic first.') };
@@ -169,7 +268,6 @@ export async function startMicrophoneAnalysis(mediaStream = microphoneStream) {
 
   try {
     audioContext = new AudioContext();
-    // On some browsers the context starts "suspended" until a gesture; resume() is safe here.
     if (audioContext.state === 'suspended') {
       await audioContext.resume();
     }
@@ -177,14 +275,11 @@ export async function startMicrophoneAnalysis(mediaStream = microphoneStream) {
     const sourceNode = audioContext.createMediaStreamSource(mediaStream);
     analyserNode = audioContext.createAnalyser();
     analyserNode.fftSize = analyserFftSize;
-
     sourceNode.connect(analyserNode);
 
-    // Byte arrays: each sample is 0..255. Time-domain centers on 128 = silence.
     timeDomainBytes = new Uint8Array(analyserNode.fftSize);
-    // Frequency bins: fftSize/2 bins from low pitch to high (also 0..255 energy).
     frequencyBytes = new Uint8Array(analyserNode.frequencyBinCount);
-
+    resetAudioFeatureState();
     beginNoiseFloorCalibration();
 
     return { ok: true };
@@ -196,12 +291,6 @@ export async function startMicrophoneAnalysis(mediaStream = microphoneStream) {
   }
 }
 
-/**
- * Copy the latest mic snapshot into the two buffers (call once per animation frame).
- * @param {Uint8Array} timeDomainOut - same length as analyser fftSize
- * @param {Uint8Array} frequencyOut - length frequencyBinCount
- * @returns {boolean} false if analysis was never started
- */
 export function sampleMicrophoneAnalysis(timeDomainOut, frequencyOut) {
   if (!analyserNode) {
     return false;
@@ -217,10 +306,28 @@ export function sampleMicrophoneAnalysis(timeDomainOut, frequencyOut) {
     normalizedLoudness = normalizeRmsToLoudness(latestRms);
   }
 
+  spectralFlux = computeSpectralFlux(frequencyOut);
+  updateAudioTargets();
+
   return true;
 }
 
-/** Buffers allocated in startMicrophoneAnalysis(); null until then. */
+/** Step 6.8 — smooth energy/chaos after targets update (call once per frame). */
+export function updateSmoothedAudioMood(deltaSeconds) {
+  smoothedEnergy = smoothValueWithAttackRelease(
+    smoothedEnergy,
+    targetEnergy,
+    deltaSeconds,
+    audioSignalSmoothing,
+  );
+  smoothedChaos = smoothValueWithAttackRelease(
+    smoothedChaos,
+    targetChaos,
+    deltaSeconds,
+    audioSignalSmoothing,
+  );
+}
+
 export function getMicrophoneAnalysisBuffers() {
   return { timeDomain: timeDomainBytes, frequency: frequencyBytes };
 }

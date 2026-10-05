@@ -157,12 +157,25 @@ export function moodToSwimMood(energy, chaos) {
 export const smoothedSwimMood = { uMood: 0 };
 
 export function updateSmoothedSwimMood(targetUMood, deltaSeconds) {
-  const current = smoothedSwimMood.uMood;
-  const target = clamp01(targetUMood);
+  smoothedSwimMood.uMood = smoothValueWithAttackRelease(
+    smoothedSwimMood.uMood,
+    targetUMood,
+    deltaSeconds,
+  );
+}
+
+/** Step 6.8 — same attack/release envelope as flock mood weights. */
+export function smoothValueWithAttackRelease(
+  current,
+  target,
+  deltaSeconds,
+  rates = moodWeightSmoothing,
+) {
+  const clampedTarget = clamp01(target);
   const rate =
-    target > current ? moodWeightSmoothing.attackRate : moodWeightSmoothing.releaseRate;
+    clampedTarget > current ? rates.attackRate : rates.releaseRate;
   const blend = 1 - Math.exp(-rate * deltaSeconds);
-  smoothedSwimMood.uMood = current + (target - current) * blend;
+  return current + (clampedTarget - current) * blend;
 }
 
 /** CPU phase speed: calm ~0.55× base, panic ~1.75× base (matches shader feel). */
