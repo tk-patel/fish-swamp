@@ -52,7 +52,7 @@ export function applyWaterGradientBackground(scene) {
  * Light murk. FogExp2 blends things toward fogColor the farther they are:
  * factor = 1 - exp(-(density * distance)^2). Low density = clear shallow water.
  */
-export function applyPondFog(scene, density = 0.016) {
+export function applyPondFog(scene, density = 0.008) {
   scene.fog = new THREE.FogExp2(fogColor, density);
   return scene.fog;
 }

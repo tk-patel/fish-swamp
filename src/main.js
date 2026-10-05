@@ -24,6 +24,7 @@ import {
   updateSmoothedAudioMood,
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
+import { createPondEnvironment } from './environment.js';
 import { applyPondFog, applyWaterGradientBackground, createPondSize } from './pond.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
 // the page. We use it to tweak numbers live instead of edit-save-reload.
@@ -38,7 +39,7 @@ const scene = new THREE.Scene();
 
 // Step 7.1 — gradient water behind the pond + light fog (see pond.js).
 applyWaterGradientBackground(scene);
-applyPondFog(scene, 0.016);
+applyPondFog(scene, 0.008);
 
 // ---------------------------------------------------------------------------
 // 2. CAMERA - the "eye". PerspectiveCamera behaves like a real camera or your
@@ -215,6 +216,10 @@ const fishCount = Number(new URLSearchParams(window.location.search).get('fish')
 // Soft boundaries (step 1.8) turn fish back near the invisible banks, the
 // surface and the floor.
 // ---------------------------------------------------------------------------
+// Step 7.2 — sand floor, rocks and swaying plants (see environment.js).
+const pondEnvironment = createPondEnvironment();
+scene.add(pondEnvironment.group);
+
 const pondSize = createPondSize();
 const flock = createFlock(fishCount, pondSize);
 scene.add(flock.mesh);
@@ -376,6 +381,7 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
+let elapsedSeconds = 0; // total running time, drives plant sway
 let framesSinceStatsUpdate = 0;
 let secondsSinceStatsUpdate = 0;
 
@@ -410,6 +416,8 @@ function animate() {
   // Always move things as `speed (units per second) * deltaSeconds`
   // (see step 0.3).
   const deltaSeconds = timer.getDelta();
+  elapsedSeconds += deltaSeconds;
+  pondEnvironment.update(elapsedSeconds);
 
   if (isMicrophoneAnalysisReady()) {
     const { timeDomain, frequency } = getMicrophoneAnalysisBuffers();
