@@ -1,7 +1,7 @@
 # PROGRESS.md
 
-**Current step:** 7.2+ (optional polish) — finished 7.1
-**Last updated:** 2026-10-04 (finished 7.1)
+**Current step:** Phase 7 polish — finished 7.1 (reworked), 7.2, 7.3, 7.6
+**Last updated:** 2026-10-04 (7.2, 7.3, 7.6 done)
 
 Rules: tick a box only after the step is done, committed, and explained. Add a one-line log entry below the checklist. Do not start the next step until the owner says "next".
 
@@ -70,11 +70,11 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 
 ### Phase 7 — Polish (optional)
 - [x] 7.1 Gradient water and fog
-- [ ] 7.2 Floor, rocks, plants
-- [ ] 7.3 Light rays / caustics
+- [x] 7.2 Floor, rocks, plants
+- [x] 7.3 Light rays / caustics
 - [ ] 7.4 Camera drift
 - [ ] 7.5 Bloom
-- [ ] 7.6 Better fish model (GLB)
+- [x] 7.6 Better fish model (built in code, no GLB)
 - [ ] 7.7 Mobile and performance
 - [ ] 7.8 Deploy
 
@@ -124,6 +124,10 @@ Rules: tick a box only after the step is done, committed, and explained. Add a o
 - step 6.4 — 1 s noise floor + normalize to 0..1; R to recalibrate — 8640241
 - step 6.5–6.10 — volatility/flux bars, energy+chaos, smooth + mic→mood, tuning constants — 39aa60a
 - step 7.1 — pond bounds from camera frustum; gradient background + fog; tank wireframe/grid removed — 2ff2bc2
+- step 7.1 rework — fixed shallow pond (46 x 6 x 30) instead of frustum-derived bounds, angled camera, light fog (0.008), vertical gradient; removed depth shrink/darken and the always-on watch-fish debug tint + perception sphere; default fish 160; vertical damping + smaller vertical boundary margin for shallow water — 7cb3fed
+- step 7.2 — `src/environment.js`: dune floor (sine heights + vertex colors), 12 low-poly rocks + pebbles (noise-displaced icosahedrons, seeded random), ~330 seaweed blades as one InstancedMesh with a vertex-shader sway — 448718a
+- step 7.3 — `src/caustics.js`: procedural caustic pattern added in the fragment shader of floor and rocks; 9 additive-blended light-shaft cones — 59c1576
+- step 7.6 — fish rebuilt in code as ONE merged mesh: shaped body with belly/patch brightness, forked tail, dorsal + pectoral fins, eyes; grey vertex colors x koi-palette instance colors; DoubleSide material — d40862e. No GLB: the project has no model file; swapping later only touches createFishGeometry().
 
 ## Phase 4 performance (step 4.7)
 Brute-force neighbors = ~n² distance checks per frame (each fish scans all others). GPU stays cheap (one fish draw call); CPU is the limit.
