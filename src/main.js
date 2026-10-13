@@ -22,7 +22,7 @@ import {
 } from './audio.js';
 import { applyMoodPreset, moodState, moodToFlockWeights, moodToSwimMood, smoothedFlockWeights, smoothedSwimMood, swimMoodToSpeedMultiplier, updateSmoothedFlockWeights, updateSmoothedSwimMood } from './mood.js';
 import { computePondSizeFromCamera, pondWaterDepth } from './pond.js';
-import { createWaterFloor, createWaterSurface } from './water.js';
+import { createWaterFloor } from './water.js';
 import { createFishShadows } from './shadows.js';
 import { createLilies } from './lilies.js';
 // lil-gui draws a small control panel (sliders, checkboxes) in the corner of
@@ -199,9 +199,8 @@ scene.add(sunLight);
 // ---------------------------------------------------------------------------
 // FISH SCHOOL (steps 3.1–3.3) — InstancedMesh + typed-array flock in flock.js
 // ---------------------------------------------------------------------------
-// Step 9.1 — 20–25 koi keeps the pond calm and uncluttered; ?fish=N still works.
-// (Step 4.7 debug reminder: try ?fish=300, ?fish=600, ?fish=1000 and watch FPS.)
-const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 22;
+// Step 9.3 — bigger illustrated koi (details need room); ?fish=N still works.
+const fishCount = Number(new URLSearchParams(window.location.search).get('fish')) || 28;
 
 // ---------------------------------------------------------------------------
 // POND (phase 7, reshaped in 8.1) — a shallow column of water whose x/z size
@@ -218,8 +217,8 @@ scene.add(flock.mesh);
 // ---------------------------------------------------------------------------
 // POND LAYERS (phase 9) — the watercolour look. We stack a few flat pieces at
 // different heights so the camera (looking straight down) sees them layered:
-// the painted floor is deepest, the koi and their shadows sit in between, the
-// ripple surface and the lily pads float on top. Each module returns its own
+// the painted floor is deepest, the koi and their shadows sit in between, and
+// the lily pads float on top. Each module returns its own
 // mesh plus an update() function we call every frame.
 // ---------------------------------------------------------------------------
 const pondFloorY = -pondWaterDepth;
@@ -235,9 +234,6 @@ scene.add(waterFloor.mesh);
 // keeps every shadow glued under its fish (see shadows.js).
 const fishShadows = createFishShadows(flock.mesh, fishCount, pondFloorY);
 scene.add(fishShadows.mesh);
-
-const waterSurface = createWaterSurface(0, swimTopY, swimBottomY);
-scene.add(waterSurface.mesh);
 
 const lilies = createLilies(pondFloorY);
 scene.add(lilies.group);
@@ -346,6 +342,7 @@ const waveFolder = gui.addFolder('Swim wave');
 waveFolder.add(fishWaveUniforms.uAmplitude, 'value', 0, 1, 0.01).name('amplitude');
 waveFolder.add(fishWaveUniforms.uWavelength, 'value', 0.5, 8, 0.1).name('wavelength');
 waveFolder.add(fishWaveSettings, 'speed', 0, 25, 0.1).name('speed (rad/s)');
+waveFolder.add(fishWaveUniforms.uTurnBend, 'value', 0, 0.2, 0.005).name('turn curl');
 
 // Step 4.6 — live flock tuning (presets in flock.js flockPresets).
 const flockFolder = gui.addFolder('Flocking');
@@ -541,11 +538,7 @@ function animate() {
   fishWaveSettings.moodSpeedMul = swimMoodToSpeedMultiplier(smoothedSwimMood.uMood);
 
   flock.update(deltaSeconds);
-  // Both read the flock's freshly-updated positions, so they run right after
-  // it: shadows slide the koi's silhouette (offset by height) onto the floor,
-  // and the surface paints ripple rings only around shallow swimmers.
   fishShadows.update(flock);
-  waterSurface.update(elapsedSeconds, flock);
 
   // Take the picture: draw `scene` as seen by `camera`.
   renderer.render(scene, camera);

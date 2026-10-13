@@ -12,7 +12,7 @@
 // Cheaper than shadow maps, and much easier to make look like a painting.
 
 import * as THREE from 'three';
-import { fishWaveUniforms, koiWaveGlsl, KOI_NOSE_Z, KOI_STALK_Z } from './fish.js';
+import { fishWaveUniforms, koiTextureGlsl, koiTextureUniforms, koiWaveGlsl } from './fish.js';
 
 // SUN DIRECTION (fake): for every 1 unit an object is above the floor, its
 // shadow moves this far on the floor. -x = screen left, +z = screen down, so
@@ -22,100 +22,62 @@ export const SHADOW_SHIFT_PER_HEIGHT = new THREE.Vector2(-0.32, 0.42);
 const shadowColor = /* glsl */ `vec3(4.0, 34.0, 46.0) / 255.0`; // deep teal ink
 
 // ---------------------------------------------------------------------------
-// FISH SHADOWS — one InstancedMesh, one flat rectangle per koi. The fragment
-// shader "cuts out" a koi silhouette inside the rectangle with maths.
+// FISH SHADOWS (step 9.3) — the shadow REUSES the koi's own geometry and
+// painted texture. Same vertices, same swim bend (koiSwimPosition), same
+// picture — but we only keep the picture's ALPHA (its shape) and paint it
+// dark teal. So the shadow always matches the koi exactly, fins and all.
+//
+// Soft edges for free: texture2D(..., bias) asks the GPU for a SMALLER mipmap
+// (a pre-shrunk, blurrier copy of the picture). Higher fish → bigger bias →
+// blurrier shadow.
 // ---------------------------------------------------------------------------
-// Rectangle that covers the whole koi in its local x/z (with spare room for
-// the tail swing and the blur).
-const SHADOW_HALF_WIDTH = 1.5;
-const SHADOW_FRONT_Z = 1.9;
-const SHADOW_BACK_Z = -3.5;
-
 const fishShadowVertexShader = /* glsl */ `
   ${koiWaveGlsl}
+  attribute vec2 aAtlasCell;
   attribute float aShadowBlur;
-  varying vec2 vLocalXz;
+  varying vec2 vUv;
+  varying vec2 vAtlasCell;
+  varying float vKind;
   varying float vBlur;
   void main() {
-    // 'position' is in the fish's local space, flat on the floor plane.
-    vLocalXz = position.xz;
-    // Bend the silhouette with the SAME swim wave as the koi. We move the
-    // lookup point the opposite way (minus) instead of moving vertices, so
-    // the rectangle can stay a simple 2-triangle quad.
-    vLocalXz.x -= koiBodyOffsetX(position.z);
+    vUv = uv;
+    vAtlasCell = aAtlasCell;
+    vKind = aFin.w;
     vBlur = aShadowBlur;
-    gl_Position = projectionMatrix * viewMatrix * modelMatrix * instanceMatrix * vec4(position, 1.0);
+    vec3 bent = koiSwimPosition(position);
+    bent.y = 0.0; // squash fins and body onto the floor plane
+    gl_Position = projectionMatrix * viewMatrix * modelMatrix * instanceMatrix * vec4(bent, 1.0);
   }
 `;
 
 const fishShadowFragmentShader = /* glsl */ `
-  varying vec2 vLocalXz;
+  ${koiTextureGlsl}
+  varying vec2 vUv;
+  varying vec2 vAtlasCell;
+  varying float vKind;
   varying float vBlur;
-
-  // Same body outline as koiProfile() in fish.js (round head, long taper).
-  float koiProfile(float t) {
-    if (t < 0.32) {
-      float k = t / 0.32;
-      return sqrt(max(0.0, 1.0 - (1.0 - k) * (1.0 - k)));
-    }
-    float k = (t - 0.32) / 0.68;
-    return mix(1.0, 0.15, pow(k, 1.4));
-  }
-
-  // "softInside(distance)" = 1 well inside a shape, 0 well outside, with a
-  // soft ramp of width vBlur across the edge. Negative distance = inside.
-  float softInside(float signedDistance) {
-    return 1.0 - smoothstep(-vBlur, vBlur, signedDistance);
-  }
-
   void main() {
-    float x = vLocalXz.x;
-    float z = vLocalXz.y;
-
-    // BODY: how far is this point outside the koi outline at this z?
-    float t = clamp((${KOI_NOSE_Z.toFixed(2)} - z) / ${(KOI_NOSE_Z - KOI_STALK_Z).toFixed(2)}, 0.0, 1.0);
-    float bodyHalfWidth = 0.46 * koiProfile(t);
-    float body = softInside(abs(x) - bodyHalfWidth);
-    // Cut off in front of the nose and behind the stalk.
-    body *= softInside(z - ${KOI_NOSE_Z.toFixed(2)}) * softInside(${KOI_STALK_Z.toFixed(2)} - z);
-
-    // TAIL: the see-through fan casts a lighter shadow (0.45). Same fan
-    // shape as fish.js: narrow root, flaring out over its length.
-    float tailV = (-1.45 - z) / 1.65;
-    float tailHalfWidth = 0.1 + 0.9 * smoothstep(0.0, 0.7, tailV);
-    float tail = softInside(abs(x) - tailHalfWidth) * softInside(-tailV) * softInside(tailV - 1.0);
-
-    // PECTORAL FINS: two light ovals behind the head.
-    vec2 finOffset = vec2(abs(x) - 0.75, z - 0.15);
-    float fins = softInside(length(finOffset / vec2(0.42, 0.32)) - 1.0);
-
-    float shade = max(body, max(tail * 0.45, fins * 0.4));
-    gl_FragColor = vec4(${shadowColor}, shade * 0.5);
+    float shape = koiSample(vUv, vAtlasCell, vKind, vBlur).a;
+    // Fins are thin and see-through, so their shadow is lighter.
+    float strength = vKind > 0.5 ? 0.25 : 0.45;
+    gl_FragColor = vec4(${shadowColor}, shape * strength);
   }
 `;
 
 export function createFishShadows(fishMesh, count, floorY) {
-  const geometry = new THREE.PlaneGeometry(
-    SHADOW_HALF_WIDTH * 2,
-    SHADOW_FRONT_Z - SHADOW_BACK_Z,
-  );
-  geometry.rotateX(-Math.PI / 2); // lie flat, facing up
-  // After rotating, the plane spans z from -length/2 to +length/2. Slide it so
-  // it covers SHADOW_BACK_Z .. SHADOW_FRONT_Z (the koi's nose is at +z).
-  geometry.translate(0, 0, (SHADOW_FRONT_Z + SHADOW_BACK_Z) / 2);
-
-  // Share the koi's phase attributes so the shadow wiggles in sync.
-  geometry.setAttribute('aPhase', fishMesh.geometry.getAttribute('aPhase'));
-  geometry.setAttribute('aWiggleMul', fishMesh.geometry.getAttribute('aWiggleMul'));
+  // Same geometry object as the koi (shared GPU buffers). We only add one
+  // extra per-fish value the koi shader ignores: how blurry the shadow is.
+  const geometry = fishMesh.geometry;
   const blur = new Float32Array(count);
   const blurAttribute = new THREE.InstancedBufferAttribute(blur, 1);
   blurAttribute.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute('aShadowBlur', blurAttribute);
 
   const material = new THREE.ShaderMaterial({
-    uniforms: { ...fishWaveUniforms },
+    uniforms: { ...fishWaveUniforms, ...koiTextureUniforms },
     vertexShader: fishShadowVertexShader,
     fragmentShader: fishShadowFragmentShader,
+    side: THREE.DoubleSide,
     transparent: true,
     depthWrite: false,
   });
@@ -158,8 +120,8 @@ export function createFishShadows(fishMesh, count, floorY) {
         placement.updateMatrix();
         mesh.setMatrixAt(i, placement.matrix);
 
-        // Higher fish = softer shadow edge.
-        blur[i] = 0.08 + 0.05 * heightAboveFloor;
+        // Higher fish = softer shadow edge (mipmap bias, ~1 = half-size copy).
+        blur[i] = 1.5 + 0.45 * heightAboveFloor;
       }
       mesh.instanceMatrix.needsUpdate = true;
       blurAttribute.needsUpdate = true;

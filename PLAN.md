@@ -367,6 +367,9 @@ Each step has: **Goal**, **Learn**, **Tasks**, **Done when** (what you see in th
 ### 9.1 Watercolour koi pond
 - Painted water floor (domain-warped noise, pigment edges, paper grain, drifting light), koi with per-fish variety patterns (kohaku, sanke, tancho, ogon, orange) and see-through flowing fins, soft floor shadows offset by height, lily pads + lotus flowers in edge clusters, ripple rings around shallow fish. ~22 koi. Learn: procedural patterns in shaders, faking shadows, sharing instance buffers between meshes.
 
+### 9.3 Illustrated 2D koi with a real swim (reference: line-art koi with orange patches)
+- Paint koi in Canvas 2D (outline, patches, flowing tail, whiskers) into a texture atlas with several varieties; bend the flat card along a spine with a travelling wave, tail flutter and turn curl; separate flapping pectoral/pelvic fins. Learn: canvas textures + atlases, travelling waves, bending along a curve's normal.
+
 ---
 
 ## Step template for the agent's reply

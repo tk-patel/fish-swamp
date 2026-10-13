@@ -1,4 +1,4 @@
-// lilies.js — lily pads and lotus flowers floating on the surface (phase 9).
+// lilies.js — lily pads floating on the surface (phase 9).
 //
 // Like the reference painting, the pads gather in clusters at the edges of
 // the pond and run off the screen, which frames the koi in the middle.
@@ -119,101 +119,6 @@ const padFragmentShader = /* glsl */ `
 `;
 
 // ---------------------------------------------------------------------------
-// LOTUS FLOWER — three rings of curved petals around a golden centre. Built
-// from real 3D geometry and lit normally, so the petals get light and shade.
-// ---------------------------------------------------------------------------
-function createPetalGeometry(length, maxHalfWidth, liftAngle, curl) {
-  const columns = 6;
-  const rows = 8;
-  const positions = [];
-  const colors = [];
-  const indices = [];
-  const baseColor = new THREE.Color('#fff4f6'); // almost white at the base
-  const tipColor = new THREE.Color('#f0598a'); // strong pink tip, as in the painting
-  const color = new THREE.Color();
-
-  for (let row = 0; row <= rows; row++) {
-    const v = row / rows; // 0 base .. 1 tip
-    // Petal outline: sin(PI * v^0.75) is 0 at both ends and widest a bit
-    // before the middle = a pointed, lens-shaped petal.
-    const halfWidth = maxHalfWidth * Math.sin(Math.PI * Math.pow(v, 0.75));
-    // The petal bends upward more and more toward its tip.
-    const elevation = liftAngle + curl * v;
-    const outward = length * v * Math.cos(elevation);
-    const up = length * v * Math.sin(elevation);
-    for (let column = 0; column <= columns; column++) {
-      const u = (column / columns) * 2 - 1;
-      // Cupped across: edges curl up (u^2) like a spoon.
-      const cup = 0.35 * maxHalfWidth * u * u;
-      positions.push(u * halfWidth, up + cup, outward);
-      // Pink grows toward the tip and the edges.
-      color.copy(baseColor).lerp(tipColor, Math.min(1, Math.pow(v, 1.6) + 0.25 * Math.abs(u) * v));
-      colors.push(color.r, color.g, color.b);
-    }
-  }
-  const rowLength = columns + 1;
-  for (let row = 0; row < rows; row++) {
-    for (let column = 0; column < columns; column++) {
-      const a = row * rowLength + column;
-      indices.push(a, a + rowLength, a + 1, a + 1, a + rowLength, a + rowLength + 1);
-    }
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-function createLotus() {
-  const lotus = new THREE.Group();
-  const petalMaterial = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.8,
-    side: THREE.DoubleSide,
-    // A little pink glow of its own: the blue-teal pond light would otherwise
-    // turn the petals lilac. Watercolour flowers glow, they are not shaded grey.
-    emissive: new THREE.Color('#ff9ab8'),
-    emissiveIntensity: 0.18,
-  });
-
-  // [petal count, length, half width, lift angle, curl, yaw offset]
-  // Outer petals lie open and low; inner ones stand up tighter.
-  const petalRings = [
-    [9, 1.25, 0.42, 0.12, 0.35, 0],
-    [8, 1.05, 0.38, 0.55, 0.45, 0.35],
-    [6, 0.72, 0.3, 0.75, 0.3, 0.1], // not too upright: keep the golden centre visible
-  ];
-  for (const [petalCount, length, halfWidth, lift, curl, yawOffset] of petalRings) {
-    const geometry = createPetalGeometry(length, halfWidth, lift, curl);
-    for (let i = 0; i < petalCount; i++) {
-      const petal = new THREE.Mesh(geometry, petalMaterial);
-      // Spread evenly around the centre; the offset staggers each ring so
-      // inner petals sit in the gaps between outer ones.
-      petal.rotation.y = (i / petalCount) * Math.PI * 2 + yawOffset;
-      lotus.add(petal);
-    }
-  }
-
-  // Golden seed head in the middle with an orange ring of stamens.
-  const seedHead = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.3, 0.24, 0.16, 20),
-    new THREE.MeshStandardMaterial({ color: '#f2c94c', roughness: 0.7 }),
-  );
-  seedHead.position.y = 0.34;
-  lotus.add(seedHead);
-  const stamens = new THREE.Mesh(
-    new THREE.TorusGeometry(0.34, 0.07, 8, 24),
-    new THREE.MeshStandardMaterial({ color: '#f0a03a', roughness: 0.8 }),
-  );
-  stamens.rotation.x = Math.PI / 2;
-  stamens.position.y = 0.3;
-  lotus.add(stamens);
-  return lotus;
-}
-
-// ---------------------------------------------------------------------------
 // LAYOUT — clusters like the painting: top-right, bottom-left, one on the
 // right. (x: -1 left .. +1 right, z: -1 top .. +1 bottom of the screen;
 // values beyond +-1 hang off the screen.)
@@ -229,9 +134,6 @@ const padLayout = [
   { x: -1.02, z: 0.3, radius: 1.9 },
   // right side, lower
   { x: 0.98, z: 0.55, radius: 1.8 },
-  // small pads that carry the lotus flowers
-  { x: 0.22, z: -0.62, radius: 1.8, lotusScale: 1.5 },
-  { x: -0.7, z: 0.58, radius: 1.3, lotusScale: 1.05 },
 ];
 
 const SURFACE_Y = 0.02; // a hair above the water surface plane
@@ -257,17 +159,7 @@ export function createLilies(floorY) {
     const padShadow = createDiscShadow(spec.radius * 1.02, 0.4, 0.34);
     group.add(padShadow);
 
-    let lotus = null;
-    let lotusShadow = null;
-    if (spec.lotusScale) {
-      lotus = createLotus();
-      lotus.scale.setScalar(spec.lotusScale);
-      group.add(lotus);
-      lotusShadow = createDiscShadow(1.6 * spec.lotusScale, 0.6, 0.3);
-      group.add(lotusShadow);
-    }
-
-    items.push({ spec, pad, padShadow, lotus, lotusShadow, baseYaw, index, heightAboveFloor });
+    items.push({ spec, pad, padShadow, baseYaw, index, heightAboveFloor });
   });
 
   function placeShadow(shadowMesh, x, z, heightAboveFloor) {
@@ -290,11 +182,6 @@ export function createLilies(floorY) {
         const z = item.spec.z * halfLength;
         item.pad.position.set(x, SURFACE_Y, z);
         placeShadow(item.padShadow, x, z, item.heightAboveFloor);
-        if (item.lotus) {
-          item.lotus.position.set(x, SURFACE_Y + 0.05, z);
-          // The flower stands higher than the pad, so its shadow lands further away.
-          placeShadow(item.lotusShadow, x, z, item.heightAboveFloor + 0.6);
-        }
       }
     },
 
@@ -303,10 +190,6 @@ export function createLilies(floorY) {
       for (const item of items) {
         // Each item gets its own timing (index) so they do not move in sync.
         item.pad.rotation.y = item.baseYaw + 0.05 * Math.sin(elapsedSeconds * 0.25 + item.index * 1.7);
-        if (item.lotus) {
-          item.lotus.rotation.y = 0.08 * Math.sin(elapsedSeconds * 0.2 + item.index);
-          item.lotus.position.y = SURFACE_Y + 0.05 + 0.03 * Math.sin(elapsedSeconds * 0.9 + item.index);
-        }
       }
     },
   };

@@ -11,10 +11,9 @@
 // and the same data layout we'll use when we add boids in phase 4.
 
 import * as THREE from 'three';
-import { createFishInstancedMesh, fishWaveSettings } from './fish.js';
+import { createFishInstancedMesh, fishWaveSettings, KOI_WORLD_SCALE } from './fish.js';
 
-const boundaryMargin = 4; // sideways: start turning back 4 units from the bank
-// (koi are ~4.6 long, so they need a little more room to turn before the edge)
+const boundaryMargin = 3; // smaller koi need less margin before the bank
 // Up/down: the pond is only ~6 deep, so the soft zone at the surface and floor is smaller.
 const verticalBoundaryMargin = 1.5;
 // Shallow water: fish mostly cruise sideways. Each second vertical speed is
@@ -23,8 +22,12 @@ const verticalDamping = 1.2;
 const boundaryWeight = 30;
 const wanderDistance = 4;
 const wanderRadius = 2;
-const wanderJitter = 6;
-const turnRate = 5;
+const wanderJitter = 7.5;
+const turnRate = 4;
+// Step 9.3 — body curl when turning: at this yaw speed (rad/s) the body is
+// fully bent; turnBendEase = how fast the curl follows (per second).
+const turnRateForFullBend = 1.6;
+const turnBendEase = 6;
 
 // Step 4.6 presets (hand-tuned; Phase 5 moods will target these):
 //   idle:        wander 1.2, sep 1.2, align 0.6, coh 0.5, maxSpeed 2.2, perception 7
@@ -95,8 +98,6 @@ const fleeAway = new THREE.Vector3();
 const wanderOffset = new THREE.Vector3();
 const wanderSphereCenter = new THREE.Vector3();
 const wanderPoint = new THREE.Vector3();
-const lookTarget = new THREE.Vector3();
-const lookMatrix = new THREE.Matrix4();
 const targetQuaternion = new THREE.Quaternion();
 const worldUp = new THREE.Vector3(0, 1, 0);
 const instancePlacement = new THREE.Object3D();
@@ -138,14 +139,28 @@ function randomWanderOffset(wanderOffsets, index) {
   wanderOffsets[index * 3 + 2] = wanderOffset.z;
 }
 
-function orientationFromVelocity(orientations, index, vx, vy, vz, px, py, pz) {
-  if (vx * vx + vy * vy + vz * vz < 1e-8) {
+// Flat top-down koi: only yaw (spin around Y). Pitch/roll would tip the
+// paper-thin shape edge-on and it reads as flipping, not swimming.
+function yawQuaternionFromVelocity(vx, vz, outQuaternion) {
+  outQuaternion.setFromAxisAngle(worldUp, Math.atan2(vx, vz));
+}
+
+// A pure yaw quaternion is (0, sin(yaw/2), 0, cos(yaw/2)), so we can read the
+// angle straight back out of its y and w parts.
+function yawFromQuaternion(quaternion) {
+  return 2 * Math.atan2(quaternion.y, quaternion.w);
+}
+
+// Bring any angle into -PI..PI (the short way round).
+function wrapAngle(angle) {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function orientationFromVelocity(orientations, index, vx, vy, vz) {
+  if (vx * vx + vz * vz < 1e-8) {
     return;
   }
-  lookTarget.set(px + vx, py + vy, pz + vz);
-  position.set(px, py, pz);
-  lookMatrix.lookAt(lookTarget, position, worldUp);
-  targetQuaternion.setFromRotationMatrix(lookMatrix);
+  yawQuaternionFromVelocity(vx, vz, targetQuaternion);
   targetQuaternion.toArray(orientations, index * 4);
 }
 
@@ -294,10 +309,10 @@ export function createFlock(count, tankSize) {
   const wanderOffsets = new Float32Array(count * 3);
   const scales = new Float32Array(count);
   const neighborScratch = new Int32Array(count);
-  const swimPhases = mesh.userData.swimPhases;
-  const wiggleMul = mesh.userData.wiggleMul;
-  const phaseAttribute = mesh.userData.phaseAttribute;
-  const wiggleAttribute = mesh.userData.wiggleAttribute;
+  // aSwim per fish (see fish.js): phase, wiggle, turnBend, speedRatio.
+  const swimState = mesh.userData.swimState;
+  const swimPhaseRates = mesh.userData.swimPhaseRates;
+  const swimAttribute = mesh.userData.swimAttribute;
 
   for (let i = 0; i < count; i++) {
     randomInPond(positions, i, tankSize);
@@ -306,7 +321,7 @@ export function createFlock(count, tankSize) {
     // Average of two randoms piles up near 0.5 (a "triangle" distribution),
     // so most fish are medium sized and very small / very big ones are rarer.
     const sizeRoll = (Math.random() + Math.random()) * 0.5;
-    scales[i] = 0.75 + sizeRoll * 0.5; // 0.75 .. 1.25
+    scales[i] = KOI_WORLD_SCALE * (0.88 + sizeRoll * 0.24);
     // Colours are painted per fish inside fish.js now (koi varieties read from
     // the aKoiBase / aKoiPatch / aKoiParams instance attributes), so there is
     // no per-instance colour call here any more.
@@ -316,9 +331,6 @@ export function createFlock(count, tankSize) {
       velocities[i * 3],
       velocities[i * 3 + 1],
       velocities[i * 3 + 2],
-      positions[i * 3],
-      positions[i * 3 + 1],
-      positions[i * 3 + 2],
     );
     writeInstanceMatrix(
       mesh,
@@ -444,32 +456,45 @@ export function createFlock(count, tankSize) {
       const speed = velocity.length();
       const speedRatio = speed / flockSettings.maxSpeed;
       // Faster fish advance swim phase faster; amplitude scales with speed too.
-      swimPhases[i] +=
+      const si = i * 4;
+      swimState[si] +=
         fishWaveSettings.speed *
         fishWaveSettings.moodSpeedMul *
-        (0.35 + 0.65 * speedRatio) *
+        swimPhaseRates[i] *
+        (0.45 + 0.55 * speedRatio) *
         deltaSeconds;
-      wiggleMul[i] = 0.45 + 0.55 * speedRatio;
+      swimState[si + 1] = 0.6 + 0.4 * speedRatio; // wiggle: lazy when slow
+      swimState[si + 3] = Math.min(speedRatio, 1);
 
       position.set(px, py, pz).addScaledVector(velocity, deltaSeconds);
       positions[pi] = position.x;
       positions[pi + 1] = position.y;
       positions[pi + 2] = position.z;
 
-      lookTarget.copy(position).add(velocity);
-      lookMatrix.lookAt(lookTarget, position, worldUp);
-      targetQuaternion.setFromRotationMatrix(lookMatrix);
-
-      fishQuaternion.fromArray(orientations, i * 4);
-      fishQuaternion.slerp(targetQuaternion, turnBlend);
-      fishQuaternion.toArray(orientations, i * 4);
+      // Heading follows the flat swim direction only. The tail beat is a
+      // vertex bend in the shader, not a rotation of the whole fish.
+      let yawRate = 0;
+      if (velocity.x * velocity.x + velocity.z * velocity.z > 1e-8) {
+        yawQuaternionFromVelocity(velocity.x, velocity.z, targetQuaternion);
+        fishQuaternion.fromArray(orientations, i * 4);
+        const yawBefore = yawFromQuaternion(fishQuaternion);
+        fishQuaternion.slerp(targetQuaternion, turnBlend);
+        fishQuaternion.toArray(orientations, i * 4);
+        // Turn speed in radians per second (+ = turning toward the fish's
+        // left, +X). wrapAngle stops a jump from +PI to -PI looking like a
+        // huge spin.
+        yawRate = wrapAngle(yawFromQuaternion(fishQuaternion) - yawBefore) / Math.max(deltaSeconds, 1e-4);
+      }
+      // turnBend: -1..1, eased so the body curls into a turn and relaxes
+      // out of it instead of snapping.
+      const targetBend = Math.max(-1, Math.min(1, yawRate / turnRateForFullBend));
+      swimState[si + 2] += (targetBend - swimState[si + 2]) * (1 - Math.exp(-turnBendEase * deltaSeconds));
 
       writeInstanceMatrix(mesh, i, position.x, position.y, position.z, orientations, scales[i]);
     }
 
     mesh.instanceMatrix.needsUpdate = true;
-    phaseAttribute.needsUpdate = true;
-    wiggleAttribute.needsUpdate = true;
+    swimAttribute.needsUpdate = true;
   }
 
   return {
@@ -479,7 +504,7 @@ export function createFlock(count, tankSize) {
     orientations,
     wanderOffsets,
     scales,
-    swimPhases,
+    swimState,
     setPondSize,
     update,
   };
